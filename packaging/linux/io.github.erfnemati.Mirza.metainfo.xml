@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.erfnemati.Mirza</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Mirza</name>
+  <summary>Voice typing for any app</summary>
+  <description>
+    <p>
+      Mirza turns your voice into text in any program. Press a shortcut, speak, and your words
+      are typed wherever your cursor is: your editor, browser, chat apps, email or terminal.
+    </p>
+    <p>
+      It uses a cloud speech-to-text service of your choice (Soniox, OpenAI or ElevenLabs) with
+      your own API key, and it handles several languages in the same sentence, such as Persian
+      and English.
+    </p>
+    <ul>
+      <li>Global shortcuts: press to start and stop, or hold to talk</li>
+      <li>Real-time transcription, typed as you speak each phrase</li>
+      <li>Works on Wayland and X11, including KDE Plasma and GNOME</li>
+      <li>Tray icon, usage and spend overview, proxy support</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.erfnemati.Mirza.desktop</launchable>
+  <icon type="stock">io.github.erfnemati.Mirza</icon>
+  <url type="homepage">https://github.com/erfnemati/mirza</url>
+  <url type="bugtracker">https://github.com/erfnemati/mirza/issues</url>
+  <developer id="io.github.erfnemati">
+    <name>The Mirza authors</name>
+  </developer>
+  <categories>
+    <category>Utility</category>
+    <category>Accessibility</category>
+  </categories>
+  <keywords>
+    <keyword>dictation</keyword>
+    <keyword>speech to text</keyword>
+    <keyword>voice typing</keyword>
+    <keyword>voice to text</keyword>
+    <keyword>transcription</keyword>
+    <keyword>Persian</keyword>
+    <keyword>Farsi</keyword>
+  </keywords>
+  <provides>
+    <binary>mirza</binary>
+  </provides>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.1" date="2026-10-01">
+      <description>
+        <p>App icons in every size and a proper app description for software centers.</p>
+      </description>
+    </release>
+    <release version="0.1.0" date="2026-09-30">
+      <description>
+        <p>First release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

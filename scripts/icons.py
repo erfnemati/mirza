@@ -85,10 +85,10 @@ def render():
     with tempfile.TemporaryDirectory() as d:
         big = os.path.join(d, "app.png")
         chrome_png(tile(mic()), big)
-        for s in (16, 32, 64, 128, 256, 512):
+        for s in (16, 24, 32, 48, 64, 128, 256, 512):
             scale(big, os.path.join(png, f"mirza-{s}.png"), s)
         subprocess.run(["cp", big, os.path.join(png, "mirza-1024.png")], check=True)
-        subprocess.run(["magick", *[os.path.join(png, f"mirza-{s}.png") for s in (16, 32, 64, 128, 256)], os.path.join(ICONS, "mirza.ico")], check=True)
+        subprocess.run(["magick", *[os.path.join(png, f"mirza-{s}.png") for s in (16, 24, 32, 48, 64, 128, 256)], os.path.join(ICONS, "mirza.ico")], check=True)
         for name, svg in tray_states().items():
             p = os.path.join(d, f"t-{name}.png"); chrome_png(svg, p)
             for s in (22, 32, 44):

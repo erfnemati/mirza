@@ -24,6 +24,15 @@ assets = [
     ["../../packaging/linux/io.github.erfnemati.Mirza.desktop", "usr/share/applications/", "644"],
     ["../../packaging/linux/mirza-panel.desktop", "usr/share/applications/", "644"],
     ["../../assets/icons/io.github.erfnemati.Mirza.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+    ["../../assets/icons/png/mirza-16.png", "usr/share/icons/hicolor/16x16/apps/io.github.erfnemati.Mirza.png", "644"],
+    ["../../assets/icons/png/mirza-24.png", "usr/share/icons/hicolor/24x24/apps/io.github.erfnemati.Mirza.png", "644"],
+    ["../../assets/icons/png/mirza-32.png", "usr/share/icons/hicolor/32x32/apps/io.github.erfnemati.Mirza.png", "644"],
+    ["../../assets/icons/png/mirza-48.png", "usr/share/icons/hicolor/48x48/apps/io.github.erfnemati.Mirza.png", "644"],
+    ["../../assets/icons/png/mirza-64.png", "usr/share/icons/hicolor/64x64/apps/io.github.erfnemati.Mirza.png", "644"],
+    ["../../assets/icons/png/mirza-128.png", "usr/share/icons/hicolor/128x128/apps/io.github.erfnemati.Mirza.png", "644"],
+    ["../../assets/icons/png/mirza-256.png", "usr/share/icons/hicolor/256x256/apps/io.github.erfnemati.Mirza.png", "644"],
+    ["../../assets/icons/png/mirza-512.png", "usr/share/icons/hicolor/512x512/apps/io.github.erfnemati.Mirza.png", "644"],
+    ["../../packaging/linux/io.github.erfnemati.Mirza.metainfo.xml", "usr/share/metainfo/", "644"],
     ["../../packaging/linux/60-mirza-uinput.rules", "usr/lib/udev/rules.d/", "644"],
     ["../../packaging/linux/mirza-uinput.conf", "usr/lib/modules-load.d/", "644"],
 ]
@@ -36,6 +45,15 @@ assets = [
     { source = "../../packaging/linux/io.github.erfnemati.Mirza.desktop", dest = "/usr/share/applications/io.github.erfnemati.Mirza.desktop", mode = "644" },
     { source = "../../packaging/linux/mirza-panel.desktop", dest = "/usr/share/applications/mirza-panel.desktop", mode = "644" },
     { source = "../../assets/icons/io.github.erfnemati.Mirza.svg", dest = "/usr/share/icons/hicolor/scalable/apps/io.github.erfnemati.Mirza.svg", mode = "644" },
+    { source = "../../assets/icons/png/mirza-16.png", dest = "/usr/share/icons/hicolor/16x16/apps/io.github.erfnemati.Mirza.png", mode = "644" },
+    { source = "../../assets/icons/png/mirza-24.png", dest = "/usr/share/icons/hicolor/24x24/apps/io.github.erfnemati.Mirza.png", mode = "644" },
+    { source = "../../assets/icons/png/mirza-32.png", dest = "/usr/share/icons/hicolor/32x32/apps/io.github.erfnemati.Mirza.png", mode = "644" },
+    { source = "../../assets/icons/png/mirza-48.png", dest = "/usr/share/icons/hicolor/48x48/apps/io.github.erfnemati.Mirza.png", mode = "644" },
+    { source = "../../assets/icons/png/mirza-64.png", dest = "/usr/share/icons/hicolor/64x64/apps/io.github.erfnemati.Mirza.png", mode = "644" },
+    { source = "../../assets/icons/png/mirza-128.png", dest = "/usr/share/icons/hicolor/128x128/apps/io.github.erfnemati.Mirza.png", mode = "644" },
+    { source = "../../assets/icons/png/mirza-256.png", dest = "/usr/share/icons/hicolor/256x256/apps/io.github.erfnemati.Mirza.png", mode = "644" },
+    { source = "../../assets/icons/png/mirza-512.png", dest = "/usr/share/icons/hicolor/512x512/apps/io.github.erfnemati.Mirza.png", mode = "644" },
+    { source = "../../packaging/linux/io.github.erfnemati.Mirza.metainfo.xml", dest = "/usr/share/metainfo/io.github.erfnemati.Mirza.metainfo.xml", mode = "644" },
     { source = "../../packaging/linux/60-mirza-uinput.rules", dest = "/usr/lib/udev/rules.d/60-mirza-uinput.rules", mode = "644" },
     { source = "../../packaging/linux/mirza-uinput.conf", dest = "/usr/lib/modules-load.d/mirza-uinput.conf", mode = "644" },
 ]
@@ -47,6 +65,9 @@ gtk3 = "*"
 [[bin]]
 name = "mirza"
 path = "src/main.rs"
+
+[build-dependencies]
+winresource = "0.1.31"
 
 [dependencies]
 mirza-core = { path = "../core" }
