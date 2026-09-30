@@ -123,6 +123,10 @@ struct FocusIface {
 #[zbus::interface(name = "io.github.erfnemati.Mirza.Focus")]
 impl FocusIface {
     fn active(&self, id: String) {
+        tracing::debug!("active window: {id:?}");
+        if id.is_empty() {
+            return; // not a window: keep the last real one
+        }
         *self.active.lock().unwrap() = Some(id);
         (self.changed)();
     }
@@ -139,13 +143,15 @@ pub async fn watch_active_window(
     let active: SharedActive = Arc::default();
     conn.object_server().at("/focus", FocusIface { active: active.clone(), changed }).await?;
     let me = conn.unique_name().map(|n| n.to_string()).unwrap_or_default();
+    // Only real windows are reported. On some systems KWin also emits an
+    // activation with no window right after the real one, and taking that as
+    // "no window is active" made typing wait for good.
     let js = format!(
-        r#"function report() {{
-    const w = workspace.activeWindow;
-    callDBus("{me}", "/focus", "io.github.erfnemati.Mirza.Focus", "Active", w ? w.internalId.toString() : "");
+        r#"function report(w) {{
+    if (w) callDBus("{me}", "/focus", "io.github.erfnemati.Mirza.Focus", "Active", w.internalId.toString());
 }}
 workspace.windowActivated.connect(report);
-report();
+report(workspace.activeWindow);
 "#
     );
     let dir = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);

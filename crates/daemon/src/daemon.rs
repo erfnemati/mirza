@@ -551,6 +551,7 @@ impl Daemon {
     }
 
     async fn hotkey(&mut self, ev: mirza_hotkey::Event) {
+        tracing::debug!("shortcut event: {ev:?}");
         match ev {
             mirza_hotkey::Event::Pressed(id) => {
                 if self.held.contains_key(&id) {

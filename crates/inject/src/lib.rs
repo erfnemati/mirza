@@ -95,6 +95,7 @@ impl Focus {
     /// script on Linux, a foreground-window poll on Windows).
     pub fn watched(active: &SharedActive) -> Self {
         let origin = active.lock().unwrap().clone();
+        tracing::debug!("dictation started in window {origin:?}");
         Self { active: Some(active.clone()), origin }
     }
 
@@ -105,13 +106,13 @@ impl Focus {
         }
     }
 
-    /// Whether typing may go on: the original window is active, or the active
-    /// window isn't known.
+    /// Whether typing may go on: the original window is active, or it isn't
+    /// known which window dictation started in.
     pub fn ok(&self) -> bool {
         let Some(active) = &self.active else { return true };
-        match &self.origin {
-            None => true, // no report had arrived when dictation started
-            Some(origin) => !origin.is_empty() && active.lock().unwrap().as_deref() == Some(origin.as_str()),
+        match self.origin.as_deref() {
+            None | Some("") => true, // no window was known when dictation started
+            Some(origin) => active.lock().unwrap().as_deref() == Some(origin),
         }
     }
 }
@@ -221,6 +222,7 @@ fn run(
         let typed = if paste { Ok(Typed::Unmappable) } else { b.type_text(pending, &opts, &|| focus.ok()) };
         match typed {
             Ok(Typed::Chars(n)) => {
+                tracing::debug!("typed {n} characters");
                 let cut = pending.char_indices().nth(n).map_or(pending.len(), |(i, _)| i);
                 pending.drain(..cut);
             }
@@ -249,11 +251,16 @@ fn run(
                     b.restore(); // the other window gets the user's own layout back
                 }
             }
-            Msg::Hold(on) => held = on,
+            Msg::Hold(on) => {
+                tracing::debug!("typing {}", if on { "held back" } else { "released" });
+                held = on;
+            }
         }
         flush(&mut b, &mut pending, held, &mut report);
         let left = !pending.is_empty() && !focus.ok();
         if left && !paused {
+            let now = focus.active.as_ref().map(|a| a.lock().unwrap().clone());
+            tracing::debug!("paused: started in {:?}, active now {:?}", focus.origin, now);
             on_event(Event::Paused);
         }
         paused = left;
@@ -299,6 +306,6 @@ mod tests {
         }
         let g = watched(Some(""));
         g.set_current(Some("C".into()));
-        assert!(!g.ok(), "with no window at the start, text must only go to the clipboard");
+        assert!(g.ok(), "with no known window at the start, typing isn't held back");
     }
 }

@@ -11,12 +11,27 @@ use tokio::sync::mpsc;
 use crate::{Binding, Combo, Event};
 
 pub struct Registration {
-    // Dropping the session would unbind the shortcuts.
-    _session: Session<GlobalShortcuts>,
+    session: Option<Session<GlobalShortcuts>>,
     _portal: GlobalShortcuts,
-    _tasks: Vec<tokio::task::JoinHandle<()>>,
+    tasks: Vec<tokio::task::JoinHandle<()>>,
     /// What the desktop reports for each shortcut: (id, trigger description).
     pub bound: Vec<(String, String)>,
+}
+
+impl Drop for Registration {
+    /// Stops listening and closes the portal session. Without this, every
+    /// re-binding left another listener behind, and each key press arrived
+    /// once per listener.
+    fn drop(&mut self) {
+        for t in &self.tasks {
+            t.abort();
+        }
+        if let Some(session) = self.session.take() {
+            tokio::spawn(async move {
+                let _ = session.close().await;
+            });
+        }
+    }
 }
 
 /// Tells the portal which app this is, so its shortcuts show up under the
@@ -63,7 +78,7 @@ pub async fn bind(bindings: &[Binding], tx: mpsc::UnboundedSender<Event>) -> ash
             }
         }
     });
-    Ok(Registration { _session: session, _portal: portal, _tasks: vec![a, d, c], bound })
+    Ok(Registration { session: Some(session), _portal: portal, tasks: vec![a, d, c], bound })
 }
 
 /// KDE keeps the keys it first bound for a shortcut ID and ignores new
