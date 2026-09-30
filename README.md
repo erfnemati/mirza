@@ -4,7 +4,7 @@
 
 <p align="center">
 Press a shortcut, speak, and your words are typed wherever your cursor is.<br>
-Free, open-source speech-to-text dictation for <b>Linux, Windows and macOS</b>.
+Open-source speech-to-text dictation for <b>Linux, Windows and macOS</b>.
 </p>
 
 <p align="center">
@@ -15,9 +15,14 @@ Free, open-source speech-to-text dictation for <b>Linux, Windows and macOS</b>.
 
 Mirza (from «میرزا بنویس», "Mirza, write this down") is a small tray app that
 turns your voice into text in any program: your editor, browser, chat apps,
-email, terminal. It uses a cloud speech-to-text service of your choice
-(**Soniox**, **OpenAI** or **ElevenLabs**) with your own API key, and it is
-very light: about 9 MB of memory while it waits.
+email, terminal. It is very light: about 9 MB of memory while it waits.
+
+**What it costs:** the app is free and open source, but the speech
+recognition runs on a cloud service (**Soniox**, **OpenAI** or **ElevenLabs**)
+that you pay for yourself, with your own API key. You pay the service for the
+minutes you dictate. With Soniox that's roughly $0.12–0.15 per hour of speech
+(2026 prices; check the service's pricing page). Mirza shows what you've spent
+this month.
 
 ## Why use it
 
