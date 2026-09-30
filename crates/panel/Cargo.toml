@@ -1,0 +1,23 @@
+[package]
+name = "mirza-panel"
+description = "Mirza's settings window"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mirza-panel"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.7.0", features = [] }
+
+[dependencies]
+mirza-core = { path = "../core" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+# custom-protocol serves the pages built into the binary; without it Tauri
+# waits for a development server.
+tauri = { version = "2.12.0", features = ["custom-protocol"] }
+tauri-plugin-single-instance = "2.5.1"
+tokio = { version = "1.53.1", features = ["process"] }

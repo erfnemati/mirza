@@ -1,0 +1,13 @@
+#!/bin/sh
+# Load uinput now and let the logged-in user open it, so Mirza can type.
+set -e
+case "$1" in
+    configure|"")
+        modprobe uinput 2>/dev/null || true
+        if command -v udevadm >/dev/null 2>&1; then
+            udevadm control --reload-rules 2>/dev/null || true
+            udevadm trigger --settle --name-match=/dev/uinput 2>/dev/null || true
+        fi
+        ;;
+esac
+exit 0

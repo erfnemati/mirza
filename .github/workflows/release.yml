@@ -1,0 +1,184 @@
+name: Release
+
+# Push a tag matching the version in Cargo.toml (e.g. v0.1.0) to build the
+# installers for every OS and publish them as a GitHub release. Running it by
+# hand builds the same files as workflow artifacts, without a release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          if [[ "$GITHUB_REF" == refs/tags/v* && "${GITHUB_REF_NAME#v}" != "$version" ]]; then
+            echo "::error::The tag $GITHUB_REF_NAME doesn't match version $version in Cargo.toml"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  linux:
+    name: Linux ${{ matrix.arch }}
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-22.04, arch: x86_64 } # older glibc: runs on more distributions
+          - { runner: ubuntu-22.04-arm, arch: aarch64 }
+    runs-on: ${{ matrix.runner }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.arch }}
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libxdo-dev libayatana-appindicator3-dev
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb,cargo-generate-rpm
+      - name: Build
+        run: cargo build --release --locked -p mirza -p mirza-panel
+      - name: Package
+        run: |
+          mkdir -p dist
+          cargo deb -p mirza --no-build --output dist/
+          cargo generate-rpm -p crates/daemon --output dist/
+          name="mirza-$VERSION-linux-${{ matrix.arch }}"
+          mkdir "$name"
+          cp target/release/mirza target/release/mirza-panel packaging/linux/install.sh \
+             packaging/linux/io.github.erfnemati.Mirza.desktop packaging/linux/mirza-panel.desktop \
+             packaging/linux/60-mirza-uinput.rules packaging/linux/mirza-uinput.conf \
+             assets/icons/io.github.erfnemati.Mirza.svg "$name/"
+          tar -czf "dist/$name.tar.gz" "$name"
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: dist/*
+
+  windows:
+    name: Windows x64
+    needs: version
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+      - name: Build
+        run: cargo build --release --locked -p mirza -p mirza-panel
+      - name: Package
+        shell: pwsh
+        run: |
+          $nsis = (Get-Command makensis -ErrorAction SilentlyContinue).Source
+          if (-not $nsis) { $nsis = "C:\Program Files (x86)\NSIS\makensis.exe" }
+          if (-not (Test-Path $nsis)) {
+            choco install nsis -y --no-progress
+            $nsis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          }
+          New-Item -ItemType Directory -Force dist | Out-Null
+          & $nsis /DVERSION=$env:VERSION /DARCH=x64 /DSRC=..\..\target\release packaging\windows\mirza.nsi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Compress-Archive -Path target\release\mirza.exe, target\release\mirza-panel.exe `
+            -DestinationPath "dist\Mirza-$env:VERSION-windows-x64-portable.zip"
+          Get-ChildItem dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: dist/*
+
+  macos:
+    name: macOS universal
+    needs: version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+      - name: Import the signing identity
+        # Optional. A fixed identity (even self-signed) keeps the macOS
+        # permissions across updates. Store it as a base64 .p12 in the
+        # MACOS_CERT_P12 secret and its password in MACOS_CERT_PASSWORD.
+        env:
+          CERT: ${{ secrets.MACOS_CERT_P12 }}
+          PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        if: env.CERT != ''
+        run: |
+          echo "$CERT" | base64 --decode > cert.p12
+          security create-keychain -p ci build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p ci build.keychain
+          security import cert.p12 -k build.keychain -P "$PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain
+          identity=$(security find-identity -v -p codesigning build.keychain | head -1 | sed -E 's/.*"(.*)"/\1/')
+          echo "MACOS_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+          rm cert.p12
+      - name: Build and package
+        run: scripts/package-macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal
+          path: dist/*.dmg
+
+  release:
+    name: Publish
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, linux, windows, macos]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Release notes
+        run: |
+          cat > notes.md <<EOF
+          ## Downloads
+
+          | System | File |
+          |---|---|
+          | Debian, Ubuntu (x86_64 / ARM64) | \`mirza_${VERSION}-1_amd64.deb\` / \`mirza_${VERSION}-1_arm64.deb\` |
+          | Fedora, openSUSE (x86_64 / ARM64) | \`mirza-${VERSION}-1.x86_64.rpm\` / \`mirza-${VERSION}-1.aarch64.rpm\` |
+          | Other Linux | \`mirza-${VERSION}-linux-x86_64.tar.gz\` / \`mirza-${VERSION}-linux-aarch64.tar.gz\` |
+          | Windows 10/11 (x64) | \`Mirza-${VERSION}-windows-x64-setup.exe\` (or the portable zip) |
+          | macOS 11+ (Apple Silicon and Intel) | \`Mirza-${VERSION}-macos-universal.dmg\` |
+
+          See the [install guide](https://github.com/erfnemati/mirza#install). The Windows and macOS builds aren't signed yet: Windows may show a SmartScreen warning (More info → Run anyway), and macOS needs **Open Anyway** in System Settings → Privacy & Security the first time.
+          EOF
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Mirza ${{ env.VERSION }}
+          body_path: notes.md
+          generate_release_notes: true
+          files: dist/*

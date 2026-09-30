@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Mirza Settings
+Name[fa]=تنظیمات میرزا
+Comment=Settings for Mirza dictation
+Exec=mirza settings
+Icon=io.github.erfnemati.Mirza
+Terminal=false
+NoDisplay=true
+StartupWMClass=mirza-panel

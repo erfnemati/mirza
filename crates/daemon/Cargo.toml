@@ -1,0 +1,71 @@
+[package]
+name = "mirza"
+description = "Dictation from a global shortcut into any app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors = ["Mirza contributors"]
+homepage = "https://github.com/erfnemati/mirza"
+
+[package.metadata.deb]
+name = "mirza"
+section = "utils"
+priority = "optional"
+extended-description = """\
+Mirza types what you say into any app. Press a shortcut, speak Persian, \
+English or any other language, and the text appears where your cursor is. \
+It works with Soniox, ElevenLabs and OpenAI speech-to-text."""
+depends = "$auto, pipewire-bin | pulseaudio-utils | alsa-utils, libwebkit2gtk-4.1-0, libgtk-3-0"
+recommends = "wl-clipboard"
+maintainer-scripts = "../../packaging/linux/deb"
+assets = [
+    ["target/release/mirza", "usr/bin/", "755"],
+    ["target/release/mirza-panel", "usr/bin/", "755"],
+    ["../../packaging/linux/io.github.erfnemati.Mirza.desktop", "usr/share/applications/", "644"],
+    ["../../packaging/linux/mirza-panel.desktop", "usr/share/applications/", "644"],
+    ["../../assets/icons/io.github.erfnemati.Mirza.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+    ["../../packaging/linux/60-mirza-uinput.rules", "usr/lib/udev/rules.d/", "644"],
+    ["../../packaging/linux/mirza-uinput.conf", "usr/lib/modules-load.d/", "644"],
+]
+
+[package.metadata.generate-rpm]
+post_install_script = "../../packaging/linux/deb/postinst"
+assets = [
+    { source = "target/release/mirza", dest = "/usr/bin/mirza", mode = "755" },
+    { source = "target/release/mirza-panel", dest = "/usr/bin/mirza-panel", mode = "755" },
+    { source = "../../packaging/linux/io.github.erfnemati.Mirza.desktop", dest = "/usr/share/applications/io.github.erfnemati.Mirza.desktop", mode = "644" },
+    { source = "../../packaging/linux/mirza-panel.desktop", dest = "/usr/share/applications/mirza-panel.desktop", mode = "644" },
+    { source = "../../assets/icons/io.github.erfnemati.Mirza.svg", dest = "/usr/share/icons/hicolor/scalable/apps/io.github.erfnemati.Mirza.svg", mode = "644" },
+    { source = "../../packaging/linux/60-mirza-uinput.rules", dest = "/usr/lib/udev/rules.d/60-mirza-uinput.rules", mode = "644" },
+    { source = "../../packaging/linux/mirza-uinput.conf", dest = "/usr/lib/modules-load.d/mirza-uinput.conf", mode = "644" },
+]
+
+[package.metadata.generate-rpm.requires]
+gtk3 = "*"
+"webkit2gtk4.1" = "*"
+
+[[bin]]
+name = "mirza"
+path = "src/main.rs"
+
+[dependencies]
+mirza-core = { path = "../core" }
+mirza-hotkey = { path = "../hotkey" }
+mirza-inject = { path = "../inject" }
+serde_json = "1.0.151"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util", "signal"] }
+toml_edit = "0.25.15"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = "0.3.6"
+zbus = { version = "5.19.0", default-features = false, features = ["tokio"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+tao = "0.37.1"
+tray-icon = "0.26.0"
+
+[target.'cfg(windows)'.dependencies]
+notify-rust = "4.18.1"
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Registry", "Win32_System_Console"] }

@@ -1,0 +1,25 @@
+[workspace]
+resolver = "3"
+members = ["crates/core", "crates/hotkey", "crates/inject", "crates/daemon", "crates/panel"]
+# The settings window needs the WebKitGTK development files on Linux; build it
+# with `cargo build -p mirza-panel`.
+default-members = ["crates/core", "crates/hotkey", "crates/inject", "crates/daemon"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/erfnemati/mirza"
+
+# Debug info only for our own code keeps debug builds small (several GB less).
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

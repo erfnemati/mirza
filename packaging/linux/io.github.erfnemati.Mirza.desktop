@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Mirza
+Name[fa]=میرزا
+GenericName=Dictation
+Comment=Type what you say into any app
+Comment[fa]=هرچه می‌گویید را در هر برنامه‌ای تایپ می‌کند
+Exec=mirza
+Icon=io.github.erfnemati.Mirza
+Terminal=false
+Categories=Utility;Accessibility;
+Keywords=speech;dictation;voice;transcription;speech-to-text;soniox;میرزا;گفتار;
+StartupNotify=false

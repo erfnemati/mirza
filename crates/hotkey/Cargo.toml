@@ -1,0 +1,28 @@
+[package]
+name = "mirza-hotkey"
+description = "Global shortcuts with press and release events"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio = { version = "1.53.1", features = ["rt", "macros", "sync", "time"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.13.13", default-features = false, features = ["tokio", "global_shortcuts"] }
+futures-util = "0.3.34"
+zbus = { version = "5.19.0", default-features = false, features = ["tokio"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.25.0"
+core-foundation = "0.10.1"
+
+[dev-dependencies]
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+mirza-inject = { path = "../inject" }
+zbus = { version = "5.19.0", default-features = false, features = ["tokio"] }
