@@ -81,7 +81,7 @@ impl Matcher {
         self.entries = bindings
             .iter()
             .filter_map(|b| {
-                let combo = Combo::parse(&b.keys).ok()?;
+                let combo = Combo::parse(&b.keys).ok().filter(Combo::is_safe_global)?;
                 Some(Entry { id: b.id.clone(), combo, hold: hold.contains(&b.id), active: false, dirty: false })
             })
             .collect();

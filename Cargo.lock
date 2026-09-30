@@ -2418,7 +2418,7 @@ dependencies = [
 
 [[package]]
 name = "mirza"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "ksni",
  "mirza-core",
@@ -2439,7 +2439,7 @@ dependencies = [
 
 [[package]]
 name = "mirza-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "base64 0.23.1",
  "cpal",
@@ -2462,7 +2462,7 @@ dependencies = [
 
 [[package]]
 name = "mirza-hotkey"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "ashpd",
  "core-foundation",
@@ -2470,13 +2470,14 @@ dependencies = [
  "futures-util",
  "mirza-inject",
  "tokio",
+ "tracing",
  "windows-sys 0.61.2",
  "zbus",
 ]
 
 [[package]]
 name = "mirza-inject"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "arboard",
  "core-foundation",
@@ -2490,7 +2491,7 @@ dependencies = [
 
 [[package]]
 name = "mirza-panel"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "mirza-core",
  "serde",

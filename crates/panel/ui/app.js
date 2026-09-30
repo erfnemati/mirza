@@ -445,7 +445,7 @@ function pageTyping() {
         label: "Paste shortcut",
         desc: "The keys that paste in your apps.",
         info: "Mirza pastes instead of typing when a character isn't on any of your keyboard layouts, or for long text. Most apps paste with Ctrl+V; many terminals need Ctrl+Shift+V. Shift+Insert works almost everywhere on Linux.",
-        control: keyRecorder({ value: t.paste_key, label: "Paste shortcut", onChange: (v) => save("typing.paste_key", v.toLowerCase()) }),
+        control: keyRecorder({ value: t.paste_key, label: "Paste shortcut", global: false, onChange: (v) => save("typing.paste_key", v.toLowerCase()) }),
       }),
       h(
         "div",

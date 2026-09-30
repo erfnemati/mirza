@@ -138,6 +138,9 @@ impl Desktop {
         for (id, trigger) in &reg.bound {
             tracing::info!("shortcut {id}: {trigger}");
         }
+        if is_kde() {
+            portal::kde_set_names(&self.conn, APP_ID, "Mirza", &bindings).await;
+        }
         self.shortcuts = Some(reg);
         Ok(())
     }

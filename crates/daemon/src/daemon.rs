@@ -732,7 +732,11 @@ impl Daemon {
         let mut bindings: Vec<Binding> = Vec::new();
         for sc in &self.cfg.shortcuts {
             let id = sc.id();
-            if !sc.keys.trim().is_empty() && !bindings.iter().any(|b| b.id == id) {
+            let safe = mirza_hotkey::Combo::parse(&sc.keys).is_ok_and(|c| c.is_safe_global());
+            if !safe && !sc.keys.trim().is_empty() {
+                tracing::warn!("not binding {:?}: a global shortcut needs Ctrl, Alt or Meta", sc.keys);
+            }
+            if safe && !bindings.iter().any(|b| b.id == id) {
                 bindings.push(Binding { id, description: sc.description().into(), keys: sc.keys.clone() });
             }
         }

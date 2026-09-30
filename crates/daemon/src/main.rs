@@ -178,6 +178,37 @@ fn quit_on_signal(tx: tokio::sync::mpsc::UnboundedSender<daemon::Msg>) {
     });
 }
 
+/// Desktops tell apps apart by the service they run in, and name their
+/// shortcuts after it. Started from a terminal, Mirza would count as part of
+/// the terminal, so it starts itself again as its own user service.
+/// MIRZA_FOREGROUND=1 keeps it in the terminal (for debugging).
+#[cfg(target_os = "linux")]
+fn relaunch_as_own_app() -> bool {
+    if std::env::var_os("MIRZA_FOREGROUND").is_some() {
+        return false;
+    }
+    let cgroup = std::fs::read_to_string("/proc/self/cgroup").unwrap_or_default();
+    if cgroup.contains(&format!("app-{}", daemon::APP_ID)) {
+        return false;
+    }
+    let Ok(exe) = std::env::current_exe() else { return false };
+    let path = exe.to_string_lossy();
+    if path.contains("/target/debug/") || path.contains("/target/release/") {
+        return false; // a development build: keep it where it was started
+    }
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+    let mut cmd = std::process::Command::new("systemd-run");
+    cmd.args(["--user", "--quiet", "--collect"]).arg(format!("--unit=app-{}@{secs}", daemon::APP_ID));
+    // The service doesn't inherit the terminal's environment; pass on what matters.
+    for (k, v) in std::env::vars() {
+        let proxy = k.to_lowercase().ends_with("_proxy");
+        if k.starts_with("MIRZA_") || k.ends_with("_API_KEY") || proxy {
+            cmd.arg(format!("--setenv={k}={v}"));
+        }
+    }
+    matches!(cmd.arg(exe).status(), Ok(s) if s.success())
+}
+
 #[cfg(target_os = "linux")]
 fn run_daemon() -> ExitCode {
     init_logging();
@@ -186,6 +217,11 @@ fn run_daemon() -> ExitCode {
             Ok(l) => l,
             Err(code) => return code,
         };
+        if relaunch_as_own_app() {
+            let _ = std::fs::remove_file(mirza_core::ipc::socket_path());
+            println!("Mirza is running in the tray.");
+            return ExitCode::SUCCESS;
+        }
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let desktop = match desktop::Desktop::new(tx.clone()).await {
             Ok(d) => d,

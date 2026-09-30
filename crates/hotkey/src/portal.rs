@@ -81,3 +81,25 @@ pub async fn kde_forget(conn: &zbus::Connection, app_id: &str, shortcut_id: &str
     .and_then(|m| m.body().deserialize::<bool>().ok())
     .unwrap_or(false)
 }
+
+/// KDE names an app's shortcut group after its .desktop file, and falls back
+/// to the app ID when it can't find it at that moment. Registering the
+/// shortcuts again with the names sets the group's name to `app_name`.
+pub async fn kde_set_names(conn: &zbus::Connection, app_id: &str, app_name: &str, bindings: &[Binding]) {
+    for b in bindings {
+        // A Vec, not an array: D-Bus wants a list of strings ("as").
+        let id: Vec<&str> = vec![app_id, &b.id, app_name, &b.description];
+        let r = conn
+            .call_method(
+                Some("org.kde.kglobalaccel"),
+                "/kglobalaccel",
+                Some("org.kde.KGlobalAccel"),
+                "doRegister",
+                &(id,),
+            )
+            .await;
+        if let Err(e) = r {
+            tracing::warn!("naming the shortcut group in KDE: {e}");
+        }
+    }
+}

@@ -68,6 +68,14 @@ impl Combo {
         matches!((Combo::parse(a), Combo::parse(b)), (Ok(x), Ok(y)) if x == y)
     }
 
+    /// Whether the keys can safely be a global shortcut: a plain letter,
+    /// digit or space would stop that key from typing anywhere.
+    pub fn is_safe_global(&self) -> bool {
+        let special = self.key.len() > 1
+            && !matches!(self.key.as_str(), "space" | "enter" | "tab" | "backspace" | "escape" | "delete");
+        self.ctrl || self.alt || self.meta || self.is_lone_modifier() || special
+    }
+
     /// Whether this is a single modifier key like "RightCtrl".
     pub fn is_lone_modifier(&self) -> bool {
         !self.ctrl && !self.alt && !self.shift && !self.meta && lone_modifier(&self.key)
@@ -147,6 +155,12 @@ mod tests {
         assert!(lone.is_lone_modifier());
         assert_eq!(lone.xdg_trigger(), None);
         assert!(Combo::parse("h+Meta").is_err());
+        assert!(!Combo::parse("H").unwrap().is_safe_global(), "a plain letter would break typing");
+        assert!(!Combo::parse("Shift+H").unwrap().is_safe_global());
+        assert!(!Combo::parse("Space").unwrap().is_safe_global());
+        assert!(Combo::parse("Ctrl+Alt+H").unwrap().is_safe_global());
+        assert!(Combo::parse("F9").unwrap().is_safe_global());
+        assert!(Combo::parse("RightCtrl").unwrap().is_safe_global());
         assert!(Combo::same_keys("Meta+H", "meta + h"));
         assert!(!Combo::same_keys("Meta+H", "Meta+J"));
         assert!(Combo::parse("").is_err());

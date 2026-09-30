@@ -47,7 +47,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             active_provider: "soniox".into(),
-            shortcuts: Vec::new(),
+            shortcuts: default_shortcuts(),
             min_hold_ms: 150,
             silence_stop_sec: 60,
             max_session_sec: 900,
@@ -277,6 +277,17 @@ pub struct Credit {
     pub since: String,
 }
 
+/// Ctrl+Alt+H to start and stop, Ctrl+Alt+J to hold and talk: short, and not
+/// used by Windows, macOS, KDE or GNOME. (Meta+H is Windows' own voice typing
+/// and "hide" on macOS and GNOME; Ctrl+Alt+Space switches input sources on
+/// macOS.)
+pub fn default_shortcuts() -> Vec<Shortcut> {
+    vec![
+        Shortcut { action: Action::Dictate, keys: "Ctrl+Alt+H".into(), mode: Mode::Toggle },
+        Shortcut { action: Action::Dictate, keys: "Ctrl+Alt+J".into(), mode: Mode::Hold },
+    ]
+}
+
 pub const PROVIDERS: [&str; 3] = ["soniox", "elevenlabs", "openai"];
 
 pub fn provider_name(id: &str) -> &str {
@@ -394,7 +405,8 @@ fn json_to_toml(v: &serde_json::Value) -> Result<toml_edit::Value, String> {
 /// Replaces the [[shortcuts]] list.
 pub fn set_shortcuts(doc: &mut toml_edit::DocumentMut, list: &[Shortcut]) {
     if list.is_empty() {
-        doc.remove("shortcuts");
+        // An explicit empty list, so the defaults don't come back.
+        doc.insert("shortcuts", toml_edit::value(toml_edit::Array::new()));
         return;
     }
     let mut arr = toml_edit::ArrayOfTables::new();
@@ -435,13 +447,17 @@ pub const TEMPLATE: &str = r#"# Mirza settings. Every key is optional; the value
 
 # active_provider = "soniox"      # soniox, elevenlabs or openai
 
-# Global shortcuts. Add one or more; `mode` is "toggle" or "hold".
-# On Linux (Wayland) the desktop owns the actual key: the value here is only
-# suggested the first time, and you change it in the system shortcut settings.
+# Global shortcuts; `mode` is "toggle" or "hold". Without this section the
+# defaults are Ctrl+Alt+H (start/stop) and Ctrl+Alt+J (hold to talk).
 # [[shortcuts]]
 # action = "dictate"              # dictate, cancel, panel or next_provider
-# keys = "Meta+H"
+# keys = "Ctrl+Alt+H"
 # mode = "toggle"
+#
+# [[shortcuts]]
+# action = "dictate"
+# keys = "Ctrl+Alt+J"
+# mode = "hold"
 
 # min_hold_ms = 150               # hold mode: shorter presses are ignored
 # silence_stop_sec = 60           # stop after this long without speech (0: never)
@@ -529,6 +545,17 @@ mod tests {
         assert_eq!(cfg.shortcuts[0].mode, Mode::Hold);
         set_json(&mut doc, "silence_stop_sec", &serde_json::Value::Null).unwrap();
         assert_eq!(Config::parse(&doc.to_string()).unwrap().silence_stop_sec, 60);
+    }
+
+    #[test]
+    fn clearing_shortcuts_keeps_them_cleared() {
+        let mut doc: toml_edit::DocumentMut = TEMPLATE.parse().unwrap();
+        set_json(&mut doc, "providers.soniox.languages", &serde_json::json!(["fa"])).unwrap();
+        set_shortcuts(&mut doc, &[]);
+        let cfg = Config::parse(&doc.to_string()).unwrap();
+        assert!(cfg.shortcuts.is_empty(), "no defaults after the user removed them all");
+        assert_eq!(cfg.providers.soniox.languages, ["fa"], "the list didn't land inside a table");
+        assert_eq!(Config::default().shortcuts.len(), 2);
     }
 
     #[test]

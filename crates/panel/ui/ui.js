@@ -400,7 +400,7 @@ function suspendShortcuts(suspend) {
 
 /** A button that shows a key combination and records a new one when clicked.
  *  `lone` allows a single modifier (e.g. RightCtrl). Escape cancels. */
-function keyRecorder({ value, onChange, lone = false, emptyText = "Set shortcut", label }) {
+function keyRecorder({ value, onChange, lone = false, global = true, emptyText = "Set shortcut", label }) {
   const btn = h("button", { class: "btn recorder", type: "button", attrs: { "aria-label": label } });
   const paint = () => {
     btn.classList.toggle("empty", !value);
@@ -415,6 +415,10 @@ function keyRecorder({ value, onChange, lone = false, emptyText = "Set shortcut"
     suspendShortcuts(true);
     btn.replaceChildren(h("span", { class: "pulse" }), "Press the keys…");
     let loneCode = null;
+    // Modifiers held right now, by kind. Tracked from the key events
+    // themselves: some engines don't report the Super/Meta key as metaKey.
+    const held = new Set();
+    const kind = (code) => (MODIFIER_CODES[code] || "").replace(/^(Left|Right)/, "");
     const done = (v) => {
       suspendShortcuts(false);
       removeEventListener("keydown", down, true);
@@ -431,23 +435,31 @@ function keyRecorder({ value, onChange, lone = false, emptyText = "Set shortcut"
       e.stopPropagation();
       if (e.repeat) return;
       if (MODIFIER_CODES[e.code]) {
-        loneCode = e.code;
+        held.add(kind(e.code));
+        loneCode = held.size === 1 ? e.code : null;
         return;
       }
       loneCode = null;
-      const plain = !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey;
-      if (e.code === "Escape" && plain) return done(null);
+      const has = (m, flag) => flag || held.has(m);
+      const ctrl = has("Ctrl", e.ctrlKey), alt = has("Alt", e.altKey), shift = has("Shift", e.shiftKey), meta = has("Meta", e.metaKey);
+      if (e.code === "Escape" && !ctrl && !alt && !shift && !meta) return done(null);
       const k = codeName(e.code);
       if (!k) return;
+      // A letter, digit or space alone would stop that key from typing anywhere.
+      if (global && !ctrl && !alt && !meta && !/^(F\d+|Pause|ScrollLock|Insert|Home|End|PageUp|PageDown|Up|Down|Left|Right)$/.test(k)) {
+        toast("Add Ctrl, Alt or Meta to the key, e.g. Ctrl+Alt+H", true);
+        return done(null);
+      }
       const mods = [];
-      if (e.ctrlKey) mods.push("Ctrl");
-      if (e.altKey) mods.push("Alt");
-      if (e.shiftKey) mods.push("Shift");
-      if (e.metaKey) mods.push("Meta");
+      if (ctrl) mods.push("Ctrl");
+      if (alt) mods.push("Alt");
+      if (shift) mods.push("Shift");
+      if (meta) mods.push("Meta");
       done([...mods, k].join("+"));
     };
     const up = (e) => {
       e.preventDefault();
+      if (MODIFIER_CODES[e.code]) held.delete(kind(e.code));
       if (loneCode && e.code === loneCode) {
         if (lone) done(MODIFIER_CODES[loneCode]);
         else {

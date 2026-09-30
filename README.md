@@ -95,8 +95,9 @@ Mirza to Applications. The first time you open it:
    [Soniox](https://console.soniox.com),
    [OpenAI](https://platform.openai.com/api-keys) or
    [ElevenLabs](https://elevenlabs.io/app/settings/api-keys).
-3. Under **Shortcuts**, set a key for dictation. Then press it in any app and
-   start talking.
+3. Press **Ctrl+Alt+H** in any app and start talking; press it again to stop.
+   Or hold **Ctrl+Alt+J** while you talk. You can change both under
+   **Shortcuts**.
 
 ## Privacy
 
