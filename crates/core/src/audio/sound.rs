@@ -78,18 +78,22 @@ pub fn wav(sound: Sound, volume: u8) -> Vec<u8> {
     out
 }
 
-/// Linux: PipeWire's, PulseAudio's or ALSA's player, reading from stdin.
+/// Linux: PulseAudio's, PipeWire's or ALSA's player, reading from stdin.
 #[cfg(target_os = "linux")]
 fn play_wav(sound: Sound, _volume: u8, wav: Vec<u8>) {
     use std::io::Write;
     use std::process::{Command, Stdio};
 
     let _ = std::thread::Builder::new().name("mirza-sound".into()).spawn(move || {
-        // Marked as a notification sound, like the desktop's own.
-        let (prog, args): (&str, &[&str]) = if super::linux::has_command("pw-play") {
-            ("pw-play", &["--media-role=Notification", "-"])
-        } else if super::linux::has_command("paplay") {
-            ("paplay", &["--client-name=Mirza", "--property=media.role=event"])
+        // Played as Mirza's own stream, not as a notification sound: the sound
+        // server remembers one volume per role, and when notification sounds
+        // are muted or at zero, Mirza's would be silent too. This way they
+        // follow Mirza's own volume setting, and show up as "Mirza" in the
+        // system's mixer.
+        let (prog, args): (&str, &[&str]) = if super::linux::has_command("paplay") {
+            ("paplay", &["--client-name=Mirza", "--stream-name=Mirza", "--latency-msec=30"])
+        } else if super::linux::has_command("pw-play") {
+            ("pw-play", &["-P", "{ application.name = Mirza }", "-"])
         } else if super::linux::has_command("aplay") {
             ("aplay", &["-q", "-"])
         } else {
