@@ -7,9 +7,11 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime};
 
 use mirza_core::audio::Recorder;
+use mirza_core::audio::sound::{self, Sound};
 use mirza_core::config::{self, Action as ShortcutAction, Config, Mode, provider_name};
 use mirza_core::ipc::{Reply, Request, Snapshot, State, Status, UsageInfo};
 use mirza_core::providers::{self, StreamRequest, SttEvent};
+use mirza_core::update::{self, Release};
 use mirza_core::usage::{self, Date, Usage};
 use mirza_core::{net, normalize, secrets};
 use mirza_hotkey::Binding;
@@ -30,6 +32,11 @@ const FINISH_TIMEOUT: Duration = Duration::from_secs(10);
 /// After the user lets go of a shortcut, wait this long before typing so no
 /// modifier is still down.
 const KEYS_UP_DELAY: Duration = Duration::from_millis(150);
+/// The first update check waits a little after start, for the network to be up.
+const UPDATE_FIRST: Duration = Duration::from_secs(20);
+const UPDATE_INTERVAL: Duration = Duration::from_secs(24 * 3600);
+/// After a failed check (offline, say), try again this much later.
+const UPDATE_RETRY: Duration = Duration::from_secs(3600);
 
 pub enum Msg {
     Ipc(Request, oneshot::Sender<Reply>),
@@ -45,6 +52,7 @@ pub enum Msg {
     FocusChanged,
     RefreshUsage,
     Usage(String, Result<Usage, String>),
+    Update(Result<Release, String>),
     /// Microphone loudness, 0 to 1, about 20 times a second while recording.
     Level(f32),
 }
@@ -82,6 +90,9 @@ struct Session {
     reason: Reason,
     note: u32,
     paused_noted: bool,
+    /// Whether the start and stop sounds have played.
+    started_sound: bool,
+    stopped_sound: bool,
 }
 
 pub struct Daemon {
@@ -96,7 +107,12 @@ pub struct Daemon {
     status: Status,
     history: VecDeque<String>,
     usage: Option<(String, Usage)>,
+    /// When usage was last asked for.
     usage_at: Option<Instant>,
+    usage_loading: bool,
+    usage_error: String,
+    /// When usage last arrived, in Unix seconds.
+    usage_updated: Option<u64>,
     /// Set while the settings window records keys (see suspend_shortcuts).
     shortcuts_suspended: Option<Instant>,
     /// Loudest recent microphone level, for the recording animation.
@@ -104,6 +120,10 @@ pub struct Daemon {
     /// The recording dot's current size (see TrayView::frame).
     frame: u8,
     started_anim: Instant,
+    /// A newer release, when there is one.
+    update: Option<Release>,
+    /// When to check for updates next; None while a check is running.
+    update_due: Option<Instant>,
 }
 
 impl Daemon {
@@ -123,10 +143,15 @@ impl Daemon {
             history: VecDeque::new(),
             usage: None,
             usage_at: None,
+            usage_loading: false,
+            usage_error: String::new(),
+            usage_updated: None,
             shortcuts_suspended: None,
             level_peak: 0.0,
             frame: 0,
             started_anim: Instant::now(),
+            update: None,
+            update_due: Some(Instant::now() + UPDATE_FIRST),
         })
     }
 
@@ -137,7 +162,7 @@ impl Daemon {
         crate::autostart::sync(self.cfg.start_on_login);
         self.desktop.start(self.tray_view()).await;
         self.bind_shortcuts().await;
-        self.refresh_usage(true);
+        let _ = self.refresh_usage(true);
 
         let mut tick = tokio::time::interval(Duration::from_secs(1));
         let mut anim = tokio::time::interval(Duration::from_millis(125));
@@ -176,6 +201,7 @@ impl Daemon {
             Msg::HoldConnect(id) => {
                 if self.session.as_ref().is_some_and(|s| s.id == id && s.stopping.is_none()) {
                     self.connect();
+                    self.session_sound(Sound::Start);
                 }
             }
             Msg::ReleaseTyping(id) => {
@@ -186,10 +212,12 @@ impl Daemon {
                 }
             }
             Msg::StopTail(id) => {
-                if let Some(s) = self.session.as_mut().filter(|s| s.id == id)
-                    && let Some(r) = &s.recorder
-                {
-                    r.stop();
+                if let Some(s) = self.session.as_mut().filter(|s| s.id == id) {
+                    if let Some(r) = &s.recorder {
+                        r.stop();
+                    }
+                    // Played now that recording has ended, so it isn't recorded.
+                    self.session_sound(Sound::Stop);
                 }
             }
             Msg::Done(d) => self.done(d).await,
@@ -198,15 +226,27 @@ impl Daemon {
                     t.focus_changed();
                 }
             }
-            Msg::RefreshUsage => self.refresh_usage(false),
+            Msg::RefreshUsage => {
+                let _ = self.refresh_usage(false);
+            }
             Msg::Level(l) => self.level_peak = self.level_peak.max(l),
-            Msg::Usage(provider, result) => match result {
-                Ok(u) => {
-                    self.usage = Some((provider, u));
-                    self.update_tray().await;
+            Msg::Usage(provider, result) => {
+                self.usage_loading = false;
+                match result {
+                    Ok(u) => {
+                        self.usage = Some((provider, u));
+                        self.usage_error.clear();
+                        self.usage_updated =
+                            SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).ok().map(|d| d.as_secs());
+                        self.update_tray().await;
+                    }
+                    Err(e) => {
+                        tracing::info!("usage: {e}");
+                        self.usage_error = e;
+                    }
                 }
-                Err(e) => tracing::info!("{e}"),
-            },
+            }
+            Msg::Update(result) => self.got_update(result).await,
         }
         true
     }
@@ -248,8 +288,15 @@ impl Daemon {
                 self.suspend_shortcuts(suspend).await;
                 Ok(())
             }
-            Request::RefreshUsage => {
-                self.refresh_usage(true);
+            Request::RefreshUsage => self.refresh_usage(true),
+            Request::ClearHistory => {
+                self.history.clear();
+                self.status.last_text.clear();
+                self.update_tray().await;
+                Ok(())
+            }
+            Request::TestSound => {
+                sound::play(Sound::Start, self.cfg.sound_volume);
                 Ok(())
             }
         };
@@ -273,6 +320,7 @@ impl Daemon {
     async fn start(&mut self, hold: Option<String>) -> Result<(), String> {
         let result = self.try_start(hold).await;
         if let Err(e) = &result {
+            self.play(Sound::Error);
             self.status.last_error = e.clone();
             self.desktop.notify("Dictation failed", e, true, 0).await;
             self.update_tray().await;
@@ -333,6 +381,8 @@ impl Daemon {
             reason: Reason::User,
             note: 0,
             paused_noted: false,
+            started_sound: false,
+            stopped_sound: false,
         });
         if is_hold {
             let tx = self.tx.clone();
@@ -343,6 +393,7 @@ impl Daemon {
             });
         } else {
             self.connect();
+            self.session_sound(Sound::Start);
         }
         self.status.state = State::Listening;
         self.status.last_error.clear();
@@ -407,6 +458,11 @@ impl Daemon {
             h.abort();
         }
         drop(s.recorder.take());
+        if error.is_some() {
+            self.play(Sound::Error);
+        } else if s.started_sound && !s.stopped_sound {
+            self.play(Sound::Stop); // cancelled, or the recording ended on its own
+        }
         let reason = reason.unwrap_or(s.reason);
         let (id, note) = (s.id, s.note);
         let typing = s.typing.take();
@@ -528,8 +584,14 @@ impl Daemon {
         if self.shortcuts_suspended.is_some_and(|t| t.elapsed() > Duration::from_secs(30)) {
             self.suspend_shortcuts(false).await; // the settings window never said it was done
         }
+        if self.usage_loading && self.usage_at.is_some_and(|t| t.elapsed() > Duration::from_secs(60)) {
+            self.usage_loading = false; // the request never came back
+        }
         if self.usage_at.is_some_and(|t| t.elapsed() > Duration::from_secs(3600)) {
-            self.refresh_usage(false);
+            let _ = self.refresh_usage(false);
+        }
+        if self.cfg.check_updates && self.update_due.is_some_and(|t| Instant::now() >= t) {
+            self.check_update();
         }
         let Some(s) = self.session.as_ref() else { return };
         match s.stopping {
@@ -647,6 +709,12 @@ impl Daemon {
                 desktop::open_path(&self.cfg_path);
                 Ok(())
             }
+            TrayAction::OpenUpdate => {
+                if let Some(r) = &self.update {
+                    desktop::open_path(&r.url);
+                }
+                Ok(())
+            }
             TrayAction::Quit => return false,
         };
         if let Err(e) = result {
@@ -702,6 +770,11 @@ impl Daemon {
                 if cfg.start_on_login != self.cfg.start_on_login {
                     crate::autostart::sync(cfg.start_on_login);
                 }
+                if !cfg.check_updates {
+                    self.update = None;
+                } else if !self.cfg.check_updates {
+                    self.update_due = Some(Instant::now()); // just turned on
+                }
                 self.cfg = cfg;
                 self.status.provider = self.cfg.active_provider.clone();
                 if rebind {
@@ -747,24 +820,28 @@ impl Daemon {
     }
 
     /// Fetches the account's spend in the background, at most once a minute
-    /// unless forced.
-    fn refresh_usage(&mut self, force: bool) {
-        if !force && self.usage_at.is_some_and(|t| t.elapsed() < Duration::from_secs(60)) {
-            return;
+    /// unless forced. An error says why it can't be fetched at all.
+    fn refresh_usage(&mut self, force: bool) -> Result<(), String> {
+        if self.usage_loading || (!force && self.usage_at.is_some_and(|t| t.elapsed() < Duration::from_secs(60))) {
+            return Ok(());
         }
         let provider = self.cfg.active_provider.clone();
+        let name = provider_name(&provider);
         if provider != "soniox" {
-            return; // the others have no usage API that works with a normal key
+            // The others have no usage API that works with a normal key.
+            return Err(format!("{name} doesn't share usage with apps"));
         }
-        let Some((key, _)) = secrets::get(&provider) else { return };
-        let Ok(proxy) = net::resolve_proxy(&self.cfg.proxy) else { return };
+        let (key, _) = secrets::get(&provider).ok_or_else(|| format!("No API key for {name}"))?;
+        let proxy = net::resolve_proxy(&self.cfg.proxy).map_err(|e| e.to_string())?;
         let since = self.cfg.credit.get(&provider).and_then(|c| Date::parse(&c.since));
         self.usage_at = Some(Instant::now());
+        self.usage_loading = true;
         let tx = self.tx.clone();
         tokio::spawn(async move {
             let r = usage::soniox(&key, proxy.as_ref(), since).await;
             let _ = tx.send(Msg::Usage(provider, r));
         });
+        Ok(())
     }
 
     fn snapshot(&self) -> Snapshot {
@@ -779,10 +856,15 @@ impl Daemon {
                 requests: u.requests,
                 since_credit: u.since_credit,
             }),
+            usage_loading: self.usage_loading,
+            usage_error: self.usage_error.clone(),
+            usage_updated: self.usage_updated,
             shortcuts: self.desktop.bound_shortcuts(),
             shortcut_backend: self.desktop.shortcut_backend().into(),
             typing_problem: self.desktop.typing_problem(),
             focus_tracking: self.desktop.focus_tracking(),
+            version: update::VERSION.into(),
+            update: self.update.clone(),
         }
     }
 
@@ -828,11 +910,75 @@ impl Daemon {
             error: self.status.last_error.clone(),
             has_last: !self.history.is_empty(),
             spend: self.spend_line(),
+            update: self.update.as_ref().map(|r| r.version.clone()).unwrap_or_default(),
         }
     }
 
     async fn update_tray(&mut self) {
         self.desktop.show(self.tray_view()).await;
+    }
+
+    fn play(&self, sound: Sound) {
+        if self.cfg.sounds {
+            sound::play(sound, self.cfg.sound_volume);
+        }
+    }
+
+    /// Plays the session's start or stop sound, each once, and the stop sound
+    /// only after the start sound (a hold too short to count makes none).
+    fn session_sound(&mut self, sound: Sound) {
+        let Some(s) = self.session.as_mut() else { return };
+        let play = match sound {
+            Sound::Start => !std::mem::replace(&mut s.started_sound, true),
+            _ => s.started_sound && !std::mem::replace(&mut s.stopped_sound, true),
+        };
+        if play {
+            self.play(sound);
+        }
+    }
+
+    /// Asks GitHub for the latest release in the background.
+    fn check_update(&mut self) {
+        let Ok(proxy) = net::resolve_proxy(&self.cfg.proxy) else {
+            self.update_due = Some(Instant::now() + UPDATE_RETRY);
+            return;
+        };
+        self.update_due = None;
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            let r = update::latest(proxy.as_ref()).await;
+            let _ = tx.send(Msg::Update(r));
+        });
+    }
+
+    async fn got_update(&mut self, result: Result<Release, String>) {
+        let release = match result {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::info!("{e}");
+                self.update_due = Some(Instant::now() + UPDATE_RETRY);
+                return;
+            }
+        };
+        self.update_due = Some(Instant::now() + UPDATE_INTERVAL);
+        let newer = self.cfg.check_updates && update::is_newer(&release.version, update::VERSION);
+        let release = newer.then_some(release);
+        if release == self.update {
+            return;
+        }
+        if let Some(r) = &release {
+            tracing::info!("Mirza {} is available: {}", r.version, r.url);
+            // Each release is announced once; the menu keeps showing it.
+            let seen = config::data_dir().join("update-announced");
+            if std::fs::read_to_string(&seen).unwrap_or_default().trim() != r.version {
+                let summary = format!("Mirza {} is available", r.version);
+                let body = format!("You have {}. Download it from the Mirza menu or settings.", update::VERSION);
+                self.desktop.announce(&summary, &body).await;
+                let _ = std::fs::create_dir_all(config::data_dir()).and_then(|_| std::fs::write(&seen, &r.version));
+            }
+        }
+        self.update = release;
+        self.update_tray().await;
     }
 }
 

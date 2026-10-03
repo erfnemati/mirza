@@ -41,6 +41,7 @@ const state = {
   wayland: false,
   configPath: "",
   configError: "",
+  version: "",
   snap: null,
   section: "provider",
   models: {}, // provider -> {list, error, loading}
@@ -48,6 +49,8 @@ const state = {
   mics: [],
   editingKey: false,
   editingBalance: false,
+  usageRefreshing: false,
+  usageFresh: false,
 };
 
 const provider = () => PROVIDERS.find((p) => p.id === state.cfg.active_provider) || PROVIDERS[0];
@@ -73,6 +76,7 @@ async function loadState() {
     wayland: s.wayland,
     configPath: s.config_path,
     configError: s.config_error,
+    version: s.version,
   });
 }
 
@@ -130,6 +134,13 @@ function renderHeader() {
   const text = document.getElementById("status-text");
   const btn = document.getElementById("main-action");
   const s = state.snap && state.snap.status;
+  const update = state.snap && state.snap.update;
+  const upd = document.getElementById("update");
+  upd.classList.toggle("hidden", !update);
+  if (update) {
+    upd.replaceChildren(icon("download"), `Update to ${update.version}`);
+    upd.onclick = () => call("open_url", { url: update.url });
+  }
   btn.classList.add("hidden");
   if (!s) {
     dot.className = "dot off";
@@ -537,8 +548,12 @@ function pageListening() {
 
 function pageUsage() {
   const p = provider();
-  const refresh = button("Refresh", () => call("send", { request: { cmd: "refresh_usage" } }).then(() => setTimeout(poll, 1500)), { size: "sm", iconName: "refresh" });
-  const head = pageHead("Usage", `What you've spent on ${p.name}.`, p.id === "soniox" && state.snap ? refresh : null);
+  const snap = state.snap;
+  const loading = state.usageRefreshing || !!(snap && snap.usage_loading);
+  const refresh = button(loading ? "Refreshing…" : "Refresh", refreshUsage, { size: "sm", iconName: "refresh" });
+  refresh.disabled = loading;
+  refresh.classList.toggle("loading", loading);
+  const head = pageHead("Usage", `What you've spent on ${p.name}.`, p.id === "soniox" && snap ? refresh : null);
   if (p.id !== "soniox") {
     return [
       head,
@@ -550,22 +565,66 @@ function pageUsage() {
       ),
     ];
   }
-  const u = state.snap && state.snap.usage && state.snap.usage.provider === p.id ? state.snap.usage : null;
+  const u = snap && snap.usage && snap.usage.provider === p.id ? snap.usage : null;
+  const error = snap && snap.usage_error;
   const stat = (label, value) => h("div", { class: "stat" }, h("div", { class: "label", textContent: label }), h("div", { class: "value", textContent: value }));
+  const fresh = state.usageFresh;
+  state.usageFresh = false;
   return [
     head,
+    u && error ? notice(`Usage wasn't updated: ${error}`, { error: true }) : null,
     u
       ? h(
           "div",
-          { class: "stats" },
+          { class: "stats" + (fresh ? " fresh" : "") },
           stat("This month", money(u.month)),
           stat("Today", money(u.today)),
           stat("Audio this month", `${Math.round(u.month_minutes)} min`),
           stat("Dictations", String(u.requests)),
         )
-      : h("div", { class: "empty-state", style: "margin-bottom:16px", textContent: state.snap ? "Loading usage…" : "Start Mirza to see usage." }),
+      : h("div", { class: "empty-state", style: "margin-bottom:16px", textContent: !snap ? "Start Mirza to see usage." : error ? `Couldn't get usage: ${error}` : "Loading usage…" }),
+    u && snap.usage_updated ? h("p", { class: "fineprint", textContent: `Updated ${when(snap.usage_updated)}` }) : null,
     balanceGroup(p, u),
   ];
+}
+
+/** "at 14:32", or with the date when it wasn't today. */
+function when(unixSecs) {
+  const d = new Date(unixSecs * 1000);
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === new Date().toDateString()) return `at ${time}`;
+  return `on ${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })} at ${time}`;
+}
+
+/** Asks for fresh usage, waits for it, and says how it went. */
+async function refreshUsage() {
+  if (state.usageRefreshing) return;
+  state.usageRefreshing = true;
+  renderPage();
+  try {
+    const r = await call("send", { request: { cmd: "refresh_usage" } });
+    if (!r.ok) throw new Error(r.message);
+    const started = Date.now();
+    let snap = null;
+    do {
+      await new Promise((done) => setTimeout(done, 400));
+      snap = await invoke("snapshot").catch(() => null);
+    } while (snap && snap.usage_loading && Date.now() - started < 60000);
+    if (!snap) throw new Error("Mirza isn't running");
+    state.snap = snap;
+    lastSnap = JSON.stringify(snap); // so the next poll doesn't redraw over the highlight
+    if (snap.usage_error) {
+      toast(`Usage wasn't updated: ${snap.usage_error}`, true);
+    } else {
+      state.usageFresh = true;
+      toast("Usage updated");
+    }
+  } catch (e) {
+    if (e instanceof Error) toast(e.message, true); // call() already showed its own errors
+  } finally {
+    state.usageRefreshing = false;
+    if (state.section === "usage") renderPage();
+  }
 }
 
 /** Remaining balance: Soniox doesn't report it, so the user enters it once and
@@ -632,8 +691,15 @@ function balanceGroup(p, u) {
 
 function pageHistory() {
   const items = ((state.snap && state.snap.history) || []).slice().reverse();
+  const clear = button("Clear", async () => {
+    const r = await call("send", { request: { cmd: "clear_history" } });
+    if (!r.ok) return toast(r.message, true);
+    await poll();
+    renderPage();
+    toast("Recent text cleared");
+  }, { size: "sm", iconName: "trash", variant: "danger" });
   return [
-    pageHead("Recent text", "The last things you dictated, in case something didn't get typed. Kept in memory only, never saved to disk."),
+    pageHead("Recent text", "The last things you dictated, in case something didn't get typed. Kept in memory only, never saved to disk.", items.length ? clear : null),
     items.length
       ? h(
           "div",
@@ -666,6 +732,8 @@ function pageHistory() {
 
 function pageGeneral() {
   const c = state.cfg;
+  const update = state.snap && state.snap.update;
+  const testSound = () => call("send", { request: { cmd: "test_sound" } }).catch(() => {});
   const proxy = h("input", { class: "input mono", value: c.proxy, placeholder: "Use the system proxy", spellcheck: false, attrs: { "aria-label": "Proxy" } });
   proxy.addEventListener("change", () => save("proxy", proxy.value.trim()));
   return [
@@ -673,6 +741,36 @@ function pageGeneral() {
     group(
       row({ label: "Start when I log in", control: switchEl(c.start_on_login, (on) => save("start_on_login", on), "Start when I log in") }),
       row({ label: "Notifications", desc: "Short messages when dictation starts and stops. Errors always show.", control: switchEl(c.notifications, (on) => save("notifications", on), "Notifications") }),
+      h(
+        "div",
+        {},
+        row({ label: "Sounds", desc: "A short sound when dictation starts and stops.", control: switchEl(c.sounds, (on) => save("sounds", on, { rerender: true }), "Sounds") }),
+        c.sounds
+          ? h(
+              "div",
+              { class: "sub" },
+              "Volume",
+              numberInput(c.sound_volume, (v) => save("sound_volume", v).then(testSound), { min: 1, max: 100, label: "Sound volume" }),
+              h("span", { class: "unit", textContent: "%" }),
+              button("Play", testSound, { size: "sm", iconName: "play" }),
+            )
+          : null,
+      ),
+    ),
+    group(
+      h(
+        "div",
+        {},
+        row({
+          label: "Check for updates",
+          desc: update ? `Version ${update.version} is out. You have ${state.version}.` : `Once a day, Mirza looks for a newer version on GitHub. You have ${state.version}.`,
+          info: "Mirza only asks GitHub for the latest version number. Nothing about you or what you say is sent.",
+          control: switchEl(c.check_updates, (on) => save("check_updates", on, { rerender: true }), "Check for updates"),
+        }),
+        update
+          ? h("div", { class: "sub" }, button(`Download ${update.version}`, () => call("open_url", { url: update.url }), { size: "sm", variant: "primary", iconName: "download" }))
+          : null,
+      ),
     ),
     group(
       row({

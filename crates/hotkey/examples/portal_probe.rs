@@ -15,7 +15,7 @@ async fn main() {
     portal::register_app("io.github.erfnemati.Mirza").await;
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let binding = Binding { id: "probe".into(), description: "Mirza portal probe".into(), keys: keys.clone() };
-    let reg = match tokio::time::timeout(Duration::from_secs(60), portal::bind(&[binding], tx)).await {
+    let reg = match tokio::time::timeout(Duration::from_secs(60), portal::bind(&[binding], tx, None)).await {
         Ok(Ok(r)) => r,
         Ok(Err(e)) => return eprintln!("bind failed: {e}"),
         Err(_) => return eprintln!("bind timed out (a confirmation dialog may be waiting)"),

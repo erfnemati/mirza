@@ -6,7 +6,7 @@ members = ["crates/core", "crates/hotkey", "crates/inject", "crates/daemon", "cr
 default-members = ["crates/core", "crates/hotkey", "crates/inject", "crates/daemon"]
 
 [workspace.package]
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/erfnemati/mirza"

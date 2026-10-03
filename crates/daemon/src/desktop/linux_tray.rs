@@ -83,6 +83,17 @@ impl Tray for MirzaTray {
         if !v.spend.is_empty() {
             items.push(StandardItem { label: v.spend.clone(), enabled: false, ..Default::default() }.into());
         }
+        if !v.update.is_empty() {
+            items.push(
+                StandardItem {
+                    label: format!("Download Mirza {}", v.update),
+                    icon_name: "software-update-available".into(),
+                    activate: Box::new(|t: &mut Self| t.send(Action::OpenUpdate)),
+                    ..Default::default()
+                }
+                .into(),
+            );
+        }
         items.push(MenuItem::Separator);
         items.push(
             StandardItem {

@@ -17,6 +17,8 @@ Mirza (from «میرزا بنویس», "Mirza, write this down") is a small tray
 turns your voice into text in any program: your editor, browser, chat apps,
 email, terminal. It is very light: about 9 MB of memory while it waits.
 
+<p align="center"><img src="docs/screenshot.png" width="720" alt="Mirza's settings window: picking the speech service, API key, model and languages"></p>
+
 **What it costs:** the app is free and open source, but the speech
 recognition runs on a cloud service (**Soniox**, **OpenAI** or **ElevenLabs**)
 that you pay for yourself, with your own API key. You pay the service for the
@@ -50,6 +52,9 @@ the built-in voice typing of Windows and macOS.
   settings window with your usage and spend.
 - **Pauses** if you switch windows mid-sentence, so text never lands in the
   wrong app.
+- **A short sound** when it starts and stops listening, so you don't have to
+  look.
+- **Tells you about new versions** (one check a day; can be turned off).
 - **Proxy support** (HTTP and SOCKS5).
 
 ## Install

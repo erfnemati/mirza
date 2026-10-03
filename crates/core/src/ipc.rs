@@ -31,7 +31,12 @@ pub enum Request {
     },
     /// Everything the settings window shows that isn't in the config file.
     Snapshot,
+    /// Fetches usage now; the snapshot shows when it's done.
     RefreshUsage,
+    /// Plays the start sound, to try the volume.
+    TestSound,
+    /// Forgets the recent transcripts.
+    ClearHistory,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -80,6 +85,15 @@ pub struct Snapshot {
     /// Recent transcripts, newest last.
     pub history: Vec<String>,
     pub usage: Option<UsageInfo>,
+    /// Whether usage is being fetched right now.
+    #[serde(default)]
+    pub usage_loading: bool,
+    /// Why the last usage fetch failed; empty when it worked.
+    #[serde(default)]
+    pub usage_error: String,
+    /// When usage was last fetched, in Unix seconds.
+    #[serde(default)]
+    pub usage_updated: Option<u64>,
     /// Shortcuts as the desktop bound them: (id, key description).
     pub shortcuts: Vec<(String, String)>,
     /// How shortcuts are delivered: "portal", or "" when none are active.
@@ -90,6 +104,12 @@ pub struct Snapshot {
     /// you switch away (Windows, and KDE Plasma on Linux).
     #[serde(default)]
     pub focus_tracking: bool,
+    /// The running Mirza's version.
+    #[serde(default)]
+    pub version: String,
+    /// A newer release, when there is one.
+    #[serde(default)]
+    pub update: Option<crate::update::Release>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]

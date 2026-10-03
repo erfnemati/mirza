@@ -84,6 +84,26 @@ pub fn http_client(proxy: Option<&Url>, timeout: Duration) -> Result<reqwest::Cl
     b.build().map_err(|e| e.to_string())
 }
 
+/// A short reason a request failed, e.g. "timed out" or "couldn't connect
+/// (Connection refused)", without the URL.
+pub fn describe(e: &reqwest::Error) -> String {
+    if e.is_timeout() {
+        return "timed out".into();
+    }
+    let mut cause = None;
+    let mut source = std::error::Error::source(e);
+    while let Some(s) = source {
+        cause = Some(s.to_string());
+        source = s.source();
+    }
+    match (e.is_connect(), cause) {
+        (true, Some(c)) => format!("couldn't connect ({c})"),
+        (true, None) => "couldn't connect".into(),
+        (false, Some(c)) => c,
+        (false, None) => e.to_string(),
+    }
+}
+
 /// Soniox spend this month and today, and since `credit_since` if given.
 pub async fn soniox(api_key: &str, proxy: Option<&Url>, credit_since: Option<Date>) -> Result<Usage, String> {
     let http = http_client(proxy, Duration::from_secs(20))?;
@@ -113,12 +133,16 @@ async fn summary(http: &reqwest::Client, key: &str, from: Date, to: Date) -> Res
         from.iso(),
         to.iso()
     );
-    let resp = http.get(url).bearer_auth(key).send().await.map_err(|e| format!("usage: {e}"))?;
+    let resp =
+        http.get(url).bearer_auth(key).send().await.map_err(|e| format!("couldn't reach Soniox: {}", describe(&e)))?;
     let status = resp.status();
     if !status.is_success() {
-        return Err(format!("usage request failed ({})", status.as_u16()));
+        return Err(match status.as_u16() {
+            401 | 403 => "Soniox didn't accept the API key".into(),
+            code => format!("Soniox answered {code}"),
+        });
     }
-    resp.json().await.map_err(|e| format!("usage: {e}"))
+    resp.json().await.map_err(|e| format!("reading Soniox's answer: {}", describe(&e)))
 }
 
 /// One day's cost out of the `days` / `cost_usd` arrays.

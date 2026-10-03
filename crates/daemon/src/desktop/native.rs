@@ -141,6 +141,10 @@ impl Desktop {
         0
     }
 
+    pub async fn announce(&self, summary: &str, body: &str) {
+        self.notify(summary, body, false, 0).await;
+    }
+
     pub async fn close_notification(&self, _id: u32) {}
 
     pub async fn show(&self, view: TrayView) {
@@ -220,10 +224,14 @@ pub fn run_ui(event_loop: EventLoop<UiEvent>, tx: mpsc::UnboundedSender<Msg>) ->
 
 struct TrayUi {
     tray: TrayIcon,
+    menu: Menu,
     icon: &'static str,
     last: Option<TrayView>,
     status: MenuItem,
     spend: MenuItem,
+    /// "Download Mirza x.y.z", in the menu only while there is a newer release.
+    update: MenuItem,
+    update_shown: bool,
     toggle: MenuItem,
     cancel: MenuItem,
     providers: Vec<(&'static str, CheckMenuItem)>,
@@ -237,6 +245,7 @@ impl TrayUi {
     fn new() -> Result<Self, String> {
         let status = MenuItem::new("Mirza", false, None);
         let spend = MenuItem::new("", false, None);
+        let update = MenuItem::new("", true, None);
         let toggle = MenuItem::new("Start dictation", true, None);
         let cancel = MenuItem::new("Cancel", false, None);
         let providers: Vec<(&'static str, CheckMenuItem)> =
@@ -254,7 +263,7 @@ impl TrayUi {
         }
         menu.append_items(&[&sep(), &copy_last, &settings, &config, &sep(), &quit]).map_err(err)?;
         let builder = TrayIconBuilder::new()
-            .with_menu(Box::new(menu))
+            .with_menu(Box::new(menu.clone()))
             .with_tooltip("Mirza")
             .with_menu_on_left_click(cfg!(target_os = "macos"));
         // macOS draws a template icon in the menu bar's own colour.
@@ -265,10 +274,13 @@ impl TrayUi {
         let tray = builder.build().map_err(|e| e.to_string())?;
         Ok(Self {
             tray,
+            menu,
             icon: "idle",
             last: None,
             status,
             spend,
+            update,
+            update_shown: false,
             toggle,
             cancel,
             providers,
@@ -296,6 +308,17 @@ impl TrayUi {
         }
         self.status.set_text(v.status_line());
         self.spend.set_text(if v.spend.is_empty() { "Usage: open the settings" } else { &v.spend });
+        if !v.update.is_empty() {
+            self.update.set_text(format!("Download Mirza {}", v.update));
+        }
+        if v.update.is_empty() == self.update_shown {
+            // Right under the status and spend lines.
+            let r = if self.update_shown { self.menu.remove(&self.update) } else { self.menu.insert(&self.update, 2) };
+            match r {
+                Ok(()) => self.update_shown = !self.update_shown,
+                Err(e) => tracing::warn!("tray menu: {e}"),
+            }
+        }
         let idle = v.state == State::Idle;
         self.toggle.set_text(if idle { "Start dictation" } else { "Stop dictation" });
         self.cancel.set_enabled(!idle);
@@ -317,6 +340,8 @@ impl TrayUi {
             Some(Action::OpenSettings)
         } else if id == self.config.id() {
             Some(Action::OpenConfigFile)
+        } else if id == self.update.id() {
+            Some(Action::OpenUpdate)
         } else if id == self.quit.id() {
             Some(Action::Quit)
         } else {

@@ -404,6 +404,15 @@ button.field .value { overflow: hidden; text-overflow: ellipsis; white-space: no
 .stat .label { color: var(--muted-foreground); font-size: 12.5px; }
 .stat .value { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin-top: 2px; }
 .balance .value { font-size: 28px; }
+/* The figures light up for a moment when fresh ones arrive. */
+.stats.fresh .stat { animation: fresh 1.4s ease-out; }
+@keyframes fresh { from { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 25%, transparent); } }
+.fineprint { margin: -8px 2px 16px; color: var(--muted-foreground); font-size: 12.5px; }
+.btn.loading svg { animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .stats.fresh .stat, .btn.loading svg { animation: none; }
+}
 
 /* Transcripts */
 .transcripts { display: flex; flex-direction: column; gap: 8px; }

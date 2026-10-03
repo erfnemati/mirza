@@ -31,7 +31,12 @@ pub struct Config {
     /// directly, anything else is a proxy URL (http:// or socks5://).
     pub proxy: String,
     pub notifications: bool,
+    /// A short sound when dictation starts and stops.
     pub sounds: bool,
+    /// How loud those sounds are, 0 to 100.
+    pub sound_volume: u8,
+    /// Once a day, ask GitHub whether a newer version of Mirza is out.
+    pub check_updates: bool,
     /// Start Mirza when you log in.
     pub start_on_login: bool,
     /// How many recent transcripts to keep for recovery (0: none).
@@ -55,7 +60,9 @@ impl Default for Config {
             record_cmd: String::new(),
             proxy: String::new(),
             notifications: true,
-            sounds: false,
+            sounds: true,
+            sound_volume: 50,
+            check_updates: true,
             start_on_login: true,
             history_size: 20,
             typing: Typing::default(),
@@ -465,6 +472,9 @@ pub const TEMPLATE: &str = r#"# Mirza settings. Every key is optional; the value
 # mic_device = ""                 # empty: system default
 # proxy = ""                      # "", "none", or e.g. "http://user:pass@host:port"
 # notifications = true
+# sounds = true                   # a short sound when dictation starts and stops
+# sound_volume = 50               # 0 to 100
+# check_updates = true            # once a day, ask GitHub whether a newer version is out
 # start_on_login = true
 # history_size = 20
 

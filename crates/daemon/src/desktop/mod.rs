@@ -28,6 +28,8 @@ pub enum Action {
     CopyLast,
     OpenSettings,
     OpenConfigFile,
+    /// Open the download page of a newer release.
+    OpenUpdate,
     Quit,
 }
 
@@ -42,6 +44,8 @@ pub struct TrayView {
     pub spend: String,
     /// While recording: how big the red dot is (0 to 5), following your voice.
     pub frame: u8,
+    /// The version of a newer release; empty when there is none.
+    pub update: String,
 }
 
 impl TrayView {
@@ -69,7 +73,7 @@ impl TrayView {
 }
 
 /// Opens a file or URL with the system's default app.
-pub fn open_path(p: &std::path::Path) {
+pub fn open_path(p: impl AsRef<std::ffi::OsStr>) {
     let program = if cfg!(target_os = "macos") {
         "open"
     } else if cfg!(windows) {

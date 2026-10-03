@@ -26,8 +26,24 @@ impl Notifier {
         } else {
             hints.insert("transient", Value::Bool(true));
         }
-        hints.insert("desktop-entry", Value::from("io.github.erfnemati.Mirza"));
         let timeout: i32 = if urgent { -1 } else { 2500 };
+        self.send(summary, body, hints, timeout, replaces).await
+    }
+
+    /// An ordinary notification that stays in the history.
+    pub async fn announce(&self, summary: &str, body: &str) {
+        self.send(summary, body, HashMap::new(), -1, 0).await;
+    }
+
+    async fn send(
+        &self,
+        summary: &str,
+        body: &str,
+        mut hints: HashMap<&str, Value<'_>>,
+        timeout: i32,
+        replaces: u32,
+    ) -> u32 {
+        hints.insert("desktop-entry", Value::from("io.github.erfnemati.Mirza"));
         let reply = self
             .conn
             .call_method(

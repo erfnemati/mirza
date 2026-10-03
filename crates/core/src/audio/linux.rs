@@ -116,6 +116,6 @@ fn command(custom: &str, device: &str, rate: u32) -> io::Result<Vec<String>> {
     Ok(args)
 }
 
-fn has_command(name: &str) -> bool {
+pub(super) fn has_command(name: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(name).is_file()))
 }

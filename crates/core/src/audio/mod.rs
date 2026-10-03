@@ -1,5 +1,5 @@
 //! Microphone capture as raw s16le mono audio at the rate a provider wants, in
-//! 50 ms chunks.
+//! 50 ms chunks, and the short sounds played when dictation starts and stops.
 
 #[cfg(not(target_os = "linux"))]
 mod cpal;
@@ -9,6 +9,7 @@ pub use self::cpal::{Recorder, devices};
 mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::Recorder;
+pub mod sound;
 
 /// Loudness of a chunk of s16le samples, 0.0 (silence) to 1.0 (full scale),
 /// on a log scale from -50 dBFS.

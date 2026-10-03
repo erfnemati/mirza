@@ -40,6 +40,7 @@ struct PanelState {
     /// The Linux desktop, e.g. "KDE" or "GNOME".
     desktop: String,
     wayland: bool,
+    version: &'static str,
 }
 
 #[derive(Serialize)]
@@ -100,6 +101,7 @@ fn load() -> PanelState {
         platform: std::env::consts::OS,
         desktop: std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(),
         wayland: std::env::var_os("WAYLAND_DISPLAY").is_some(),
+        version: env!("CARGO_PKG_VERSION"),
     }
 }
 

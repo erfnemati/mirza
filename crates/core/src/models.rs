@@ -84,7 +84,7 @@ pub async fn list(provider: &str, key: &str, proxy: Option<&Url>) -> Result<Vec<
 }
 
 async fn get(http: &reqwest::Client, url: &str, key: &str) -> Result<serde_json::Value, String> {
-    let resp = http.get(url).bearer_auth(key).send().await.map_err(|e| e.to_string())?;
+    let resp = http.get(url).bearer_auth(key).send().await.map_err(|e| crate::usage::describe(&e))?;
     let status = resp.status();
     if !status.is_success() {
         return Err(match status.as_u16() {

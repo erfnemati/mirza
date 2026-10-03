@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use ksni::TrayMethods;
-use mirza_hotkey::{Binding, Combo, portal};
+use mirza_hotkey::{Binding, portal};
 use mirza_inject::linux::SharedActive;
 use mirza_inject::{Focus, Injector};
 use tokio::sync::mpsc;
@@ -83,6 +83,12 @@ impl Desktop {
         self.notifier.show(summary, body, urgent, replaces).await
     }
 
+    /// A message worth keeping, like a new release: it stays in the
+    /// notification history.
+    pub async fn announce(&self, summary: &str, body: &str) {
+        self.notifier.announce(summary, body).await;
+    }
+
     pub async fn close_notification(&self, id: u32) {
         self.notifier.close(id).await;
     }
@@ -109,29 +115,8 @@ impl Desktop {
                 }
             }
         });
-        // The config is where keys are chosen. KDE keeps the keys it first bound
-        // for a shortcut and ignores new suggestions, so make it forget stale
-        // ones and bind again.
-        let result = match portal::bind(&bindings, htx.clone()).await {
-            Ok(reg) if is_kde() => {
-                let stale: Vec<String> = bindings
-                    .iter()
-                    .filter(|b| Combo::parse(&b.keys).ok().and_then(|c| c.xdg_trigger()).is_some())
-                    .filter(|b| reg.bound.iter().any(|(id, t)| *id == b.id && !Combo::same_keys(t, &b.keys)))
-                    .map(|b| b.id.clone())
-                    .collect();
-                if stale.is_empty() {
-                    Ok(reg)
-                } else {
-                    drop(reg);
-                    for id in &stale {
-                        portal::kde_forget(&self.conn, APP_ID, id).await;
-                    }
-                    portal::bind(&bindings, htx).await
-                }
-            }
-            other => other,
-        };
+        let kde = is_kde().then_some((&self.conn, APP_ID));
+        let result = portal::bind(&bindings, htx, kde).await;
         let reg = result.map_err(|e| {
             format!("{e}\nBind the command `mirza toggle` in your desktop's shortcut settings instead.")
         })?;
