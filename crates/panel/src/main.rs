@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use mirza_core::config::{self, Config, PROVIDERS, Shortcut};
 use mirza_core::ipc::{self, Reply, Request, Snapshot};
 use mirza_core::models;
-use mirza_core::secrets;
+use mirza_core::{net, secrets};
 use serde::Serialize;
 use tauri::Manager;
 
@@ -102,6 +102,18 @@ fn load() -> PanelState {
         desktop: std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(),
         wayland: std::env::var_os("WAYLAND_DISPLAY").is_some(),
         version: env!("CARGO_PKG_VERSION"),
+    }
+}
+
+/// The proxy Mirza connects through right now, without its password: "" for
+/// a direct connection, or an error when the setting is wrong.
+#[tauri::command]
+fn proxy_in_use() -> Result<String, String> {
+    let cfg = Config::load(&config::config_path()).unwrap_or_default();
+    match net::resolve_proxy(&cfg.proxy) {
+        Ok(Some(url)) => Ok(net::proxy_label(&url)),
+        Ok(None) => Ok(String::new()),
+        Err(e) => Err(e.to_string()),
     }
 }
 
@@ -262,6 +274,7 @@ fn main() {
         }))
         .invoke_handler(tauri::generate_handler![
             load,
+            proxy_in_use,
             snapshot,
             send,
             set_setting,

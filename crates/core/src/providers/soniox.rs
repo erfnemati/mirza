@@ -7,10 +7,13 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
-use super::{StreamRequest, SttEvent, sample_rate};
+use super::{StreamRequest, SttEvent, connect_error, lost, sample_rate, stalled};
 use crate::net;
 
 const URL: &str = "wss://stt-rt.soniox.com/transcribe-websocket";
+/// Soniox answers about once a second while audio flows, even in silence, so
+/// hearing nothing for this long means the connection is stuck.
+const STALL_AFTER: std::time::Duration = std::time::Duration::from_secs(10);
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
@@ -55,27 +58,29 @@ pub async fn stream(
     mut audio: mpsc::Receiver<Vec<u8>>,
     events: &mpsc::UnboundedSender<SttEvent>,
 ) -> Result<(), String> {
-    let mut ws =
-        net::connect_ws(URL, &[], req.proxy.as_ref()).await.map_err(|e| format!("connecting to Soniox: {e}"))?;
-    ws.send(Message::Text(start_message(req).to_string().into()))
-        .await
-        .map_err(|e| format!("starting the Soniox session: {e}"))?;
+    let proxy = req.proxy.as_ref();
+    let mut ws = net::connect_ws(URL, &[], proxy).await.map_err(|e| connect_error("Soniox", &e, proxy))?;
+    ws.send(Message::Text(start_message(req).to_string().into())).await.map_err(|e| lost("Soniox", &e, proxy))?;
 
     let mut audio_open = true;
+    let quiet = tokio::time::sleep(STALL_AFTER);
+    tokio::pin!(quiet);
     loop {
         tokio::select! {
+            _ = &mut quiet => return Err(stalled("Soniox", proxy)),
             chunk = audio.recv(), if audio_open => match chunk {
-                Some(pcm) => ws.send(Message::Binary(pcm.into())).await.map_err(|e| format!("sending audio: {e}"))?,
+                Some(pcm) => ws.send(Message::Binary(pcm.into())).await.map_err(|e| lost("Soniox", &e, proxy))?,
                 None => {
                     // An empty text frame ends the stream (an empty binary one is ignored).
-                    ws.send(Message::Text("".into())).await.map_err(|e| format!("ending the stream: {e}"))?;
+                    ws.send(Message::Text("".into())).await.map_err(|e| lost("Soniox", &e, proxy))?;
                     audio_open = false;
                 }
             },
             msg = ws.next() => {
+                quiet.as_mut().reset(tokio::time::Instant::now() + STALL_AFTER);
                 let msg = match msg {
                     Some(Ok(m)) => m,
-                    Some(Err(e)) => return Err(format!("connection to Soniox lost: {e}")),
+                    Some(Err(e)) => return Err(lost("Soniox", &e, proxy)),
                     None => return Err("Soniox closed the connection".into()),
                 };
                 let text = match msg {

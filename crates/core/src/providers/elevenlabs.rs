@@ -14,7 +14,7 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
-use super::{Joiner, StreamRequest, SttEvent, sample_rate};
+use super::{Joiner, StreamRequest, SttEvent, connect_error, lost, sample_rate};
 use crate::net;
 
 const URL: &str = "wss://api.elevenlabs.io/v1/speech-to-text/realtime";
@@ -56,9 +56,10 @@ pub async fn stream(
     mut audio: mpsc::Receiver<Vec<u8>>,
     events: &mpsc::UnboundedSender<SttEvent>,
 ) -> Result<(), String> {
-    let mut ws = net::connect_ws(&url(req), &[("xi-api-key", &req.api_key)], req.proxy.as_ref())
+    let proxy = req.proxy.as_ref();
+    let mut ws = net::connect_ws(&url(req), &[("xi-api-key", &req.api_key)], proxy)
         .await
-        .map_err(|e| format!("connecting to ElevenLabs: {e}"))?;
+        .map_err(|e| connect_error("ElevenLabs", &e, proxy))?;
     let rate = sample_rate("elevenlabs");
     let b64 = base64::engine::general_purpose::STANDARD;
     let mut joiner = Joiner::default();
@@ -78,7 +79,7 @@ pub async fn stream(
                     }
                 };
                 let msg = json!({"message_type": "input_audio_chunk", "audio_base_64": data, "commit": commit, "sample_rate": rate});
-                ws.send(Message::Text(msg.to_string().into())).await.map_err(|e| format!("sending audio: {e}"))?;
+                ws.send(Message::Text(msg.to_string().into())).await.map_err(|e| lost("ElevenLabs", &e, proxy))?;
             }
             _ = &mut quiet, if !audio_open => {
                 let _ = ws.close(None).await;
@@ -95,7 +96,7 @@ pub async fn stream(
                         return Err(format!("ElevenLabs closed the connection {why}").trim().to_owned());
                     }
                     Some(Ok(_)) => continue,
-                    Some(Err(e)) => return Err(format!("connection to ElevenLabs lost: {e}")),
+                    Some(Err(e)) => return Err(lost("ElevenLabs", &e, proxy)),
                     None if !audio_open => return Ok(()),
                     None => return Err("ElevenLabs closed the connection".into()),
                 };

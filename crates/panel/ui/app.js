@@ -735,7 +735,19 @@ function pageGeneral() {
   const update = state.snap && state.snap.update;
   const testSound = () => call("send", { request: { cmd: "test_sound" } }).catch(() => {});
   const proxy = h("input", { class: "input mono", value: c.proxy, placeholder: "Use the system proxy", spellcheck: false, attrs: { "aria-label": "Proxy" } });
-  proxy.addEventListener("change", () => save("proxy", proxy.value.trim()));
+  const proxyStatus = h("p", { class: "row-desc", style: "margin-top:8px" });
+  const showProxy = () =>
+    invoke("proxy_in_use")
+      .then((p) => {
+        proxyStatus.style.color = "";
+        proxyStatus.textContent = p ? `In use now: ${p}` : "In use now: none, Mirza connects directly.";
+      })
+      .catch((e) => {
+        proxyStatus.style.color = "var(--destructive)";
+        proxyStatus.textContent = String(e);
+      });
+  showProxy();
+  proxy.addEventListener("change", () => save("proxy", proxy.value.trim()).then(showProxy));
   return [
     pageHead("General"),
     group(
@@ -776,9 +788,9 @@ function pageGeneral() {
       row({
         label: "Proxy",
         desc: "Only needed if the speech service is blocked where you are.",
-        info: "Leave it empty to use your system's HTTPS_PROXY setting, or type none to always connect directly. Formats: http://host:port, http://user:password@host:port, socks5://host:port.",
+        info: "Leave it empty to use your system's proxy: the one your VPN app sets in Windows or macOS settings, or HTTPS_PROXY. Type none to always connect directly. Formats: http://host:port, http://user:password@host:port, socks5://host:port.",
         stack: true,
-        control: proxy,
+        control: h("div", {}, proxy, proxyStatus),
       }),
     ),
     group(

@@ -69,5 +69,10 @@ Section "Uninstall"
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Mirza"
   DeleteRegKey HKCU "${UNINST}"
   DeleteRegKey HKCU "Software\Mirza"
+  ; Mirza's name and icon for notifications (written by Mirza when it starts).
+  DeleteRegKey HKCU "Software\Classes\AppUserModelId\io.github.erfnemati.Mirza"
+  Delete "$LOCALAPPDATA\mirza\mirza.png"
+  Delete "$LOCALAPPDATA\mirza\update-announced"
+  RMDir "$LOCALAPPDATA\mirza"
   ; Settings and API keys in %APPDATA%\mirza are kept.
 SectionEnd

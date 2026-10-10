@@ -21,8 +21,9 @@ use tokio::task::JoinHandle;
 
 use crate::desktop::{self, Action as TrayAction, Desktop, TrayView};
 
-/// The app's ID: its .desktop file name, and how the shortcuts portal knows it.
-#[cfg(target_os = "linux")]
+/// The app's ID: on Linux its .desktop file name, and how the shortcuts portal
+/// knows it; on Windows what its notifications are filed under.
+#[cfg(any(target_os = "linux", windows))]
 pub const APP_ID: &str = "io.github.erfnemati.Mirza";
 
 /// Keep recording briefly after stop so the last word isn't clipped.

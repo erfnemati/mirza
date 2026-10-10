@@ -55,7 +55,8 @@ the built-in voice typing of Windows and macOS.
 - **A short sound** when it starts and stops listening, so you don't have to
   look.
 - **Tells you about new versions** (one check a day; can be turned off).
-- **Proxy support** (HTTP and SOCKS5).
+- **Proxy support** (HTTP and SOCKS5). On Windows and macOS it uses the
+  system proxy that VPN apps set, unless you enter another one.
 
 ## Install
 

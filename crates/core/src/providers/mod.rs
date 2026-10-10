@@ -11,9 +11,11 @@ mod soniox;
 
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use tokio_tungstenite::tungstenite::Error as WsError;
 use url::Url;
 
 use crate::config::Provider;
+use crate::net::NetError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SttEvent {
@@ -67,6 +69,50 @@ pub fn start(
             }
         }
     })
+}
+
+/// Why connecting to `service` failed, in plain words, with what usually helps.
+pub(crate) fn connect_error(service: &str, e: &NetError, proxy: Option<&Url>) -> String {
+    match e {
+        NetError::Ws(WsError::Http(resp)) if matches!(resp.status().as_u16(), 401 | 403) => {
+            format!("{service} didn't accept the API key")
+        }
+        NetError::Ws(WsError::Http(resp)) => format!("{service} answered {}", resp.status()),
+        NetError::BadProxy(_) => e.to_string(),
+        NetError::Ws(w) => network_error(&format!("couldn't connect to {service}"), &ws_reason(w), service, proxy),
+        other => network_error(&format!("couldn't connect to {service}"), &other.to_string(), service, proxy),
+    }
+}
+
+/// The connection to `service` broke while streaming.
+pub(crate) fn lost(service: &str, e: &WsError, proxy: Option<&Url>) -> String {
+    network_error(&format!("the connection to {service} was cut"), &ws_reason(e), service, proxy)
+}
+
+/// The connection to `service` went quiet: a blocked network often lets the
+/// connection open and then stops passing data, rather than refusing it.
+pub(crate) fn stalled(service: &str, proxy: Option<&Url>) -> String {
+    network_error(&format!("{service} isn't answering"), "the connection is stuck", service, proxy)
+}
+
+/// A network failure, and the hint that usually helps: the service is often
+/// blocked where there's no proxy, or the proxy isn't running.
+fn network_error(what: &str, reason: &str, service: &str, proxy: Option<&Url>) -> String {
+    let hint = match proxy {
+        Some(_) => "Check that your proxy is working.".to_owned(),
+        None => format!("If {service} is blocked where you are, set a proxy in Settings > General."),
+    };
+    format!("{what}: {}. {hint}", reason.trim_end_matches('.'))
+}
+
+/// A WebSocket error in plain words: for network errors, just the system's
+/// message.
+fn ws_reason(e: &WsError) -> String {
+    match e {
+        WsError::Io(io) => io.to_string(),
+        WsError::ConnectionClosed | WsError::AlreadyClosed => "the connection was closed".into(),
+        other => other.to_string(),
+    }
 }
 
 /// Joins transcript segments that arrive as separate sentences, putting a

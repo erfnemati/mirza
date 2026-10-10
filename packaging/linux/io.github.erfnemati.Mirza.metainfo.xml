@@ -51,6 +51,15 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.1.5" date="2026-10-10">
+      <description>
+        <p>On Windows, notifications show Mirza's name and icon instead of Windows PowerShell's. On
+        Windows and macOS, Mirza uses the system proxy that VPN apps set. Network errors are
+        explained in plain words with a hint about the proxy, and a Soniox connection that stops
+        answering is reported after 10 seconds instead of hanging. On Linux, the start and stop
+        sounds no longer go silent when notification sounds are muted.</p>
+      </description>
+    </release>
     <release version="0.1.4" date="2026-10-03">
       <description>
         <p>A short sound when dictation starts and stops, and a notice when a new version is out.

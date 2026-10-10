@@ -27,8 +27,9 @@ pub struct Config {
     /// Linux: a custom command that writes raw s16le mono audio to stdout at
     /// the rate given by {rate}, e.g. "pw-record --rate {rate} --channels 1 --format s16 -".
     pub record_cmd: String,
-    /// "" uses HTTPS_PROXY/ALL_PROXY from the environment if set, "none" connects
-    /// directly, anything else is a proxy URL (http:// or socks5://).
+    /// "" uses HTTPS_PROXY/ALL_PROXY from the environment if set, or on Windows
+    /// and macOS the system proxy; "none" connects directly; anything else is
+    /// a proxy URL (http:// or socks5://).
     pub proxy: String,
     pub notifications: bool,
     /// A short sound when dictation starts and stops.
@@ -470,7 +471,7 @@ pub const TEMPLATE: &str = r#"# Mirza settings. Every key is optional; the value
 # silence_stop_sec = 60           # stop after this long without speech (0: never)
 # max_session_sec = 900           # hard limit per session (0: never)
 # mic_device = ""                 # empty: system default
-# proxy = ""                      # "", "none", or e.g. "http://user:pass@host:port"
+# proxy = ""                      # "" (system proxy), "none", or e.g. "http://user:pass@host:port"
 # notifications = true
 # sounds = true                   # a short sound when dictation starts and stops
 # sound_volume = 50               # 0 to 100

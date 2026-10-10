@@ -64,6 +64,10 @@ impl Desktop {
 
     pub async fn start(&mut self, view: TrayView) {
         #[cfg(windows)]
+        if let Err(e) = register_app_id() {
+            tracing::warn!("registering Mirza for notifications: {e}");
+        }
+        #[cfg(windows)]
         {
             // Follow the foreground window so typing pauses while another is active.
             let active: SharedActive =
@@ -125,7 +129,12 @@ impl Desktop {
         let (summary, body) = (summary.to_owned(), body.to_owned());
         tokio::task::spawn_blocking(move || {
             #[cfg(windows)]
-            let r = notify_rust::Notification::new().appname("Mirza").summary(&summary).body(&body).show().map(|_| ());
+            let r = notify_rust::Notification::new()
+                .app_id(crate::daemon::APP_ID)
+                .summary(&summary)
+                .body(&body)
+                .show()
+                .map(|_| ());
             #[cfg(target_os = "macos")]
             let r = {
                 // AppleScript string literals: escape backslashes and quotes.
@@ -171,6 +180,56 @@ impl Desktop {
         } else {
             "tap"
         }
+    }
+}
+
+/// Registers Mirza's app ID with Windows so its notifications carry Mirza's
+/// name and icon. Without it, notifications from an app that isn't from the
+/// Store show up as coming from "Windows PowerShell".
+#[cfg(windows)]
+fn register_app_id() -> std::io::Result<()> {
+    use windows_sys::Win32::System::Registry::{
+        HKEY, HKEY_CURRENT_USER, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey, RegCreateKeyExW,
+        RegSetValueExW,
+    };
+    const ICON: &[u8] = include_bytes!("../../../../assets/icons/png/mirza-128.png");
+    let dir = mirza_core::config::data_dir();
+    let icon = dir.join("mirza.png");
+    if std::fs::read(&icon).ok().as_deref() != Some(ICON) {
+        std::fs::create_dir_all(&dir)?;
+        std::fs::write(&icon, ICON)?;
+    }
+    let wide = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
+    let path = wide(&format!(r"Software\Classes\AppUserModelId\{}", crate::daemon::APP_ID));
+    let values = [("DisplayName", "Mirza".to_owned()), ("IconUri", icon.to_string_lossy().into_owned())];
+    let mut key: HKEY = std::ptr::null_mut();
+    // SAFETY: standard registry calls with NUL-terminated wide strings and
+    // their sizes in bytes; the key is closed before returning.
+    unsafe {
+        let status = RegCreateKeyExW(
+            HKEY_CURRENT_USER,
+            path.as_ptr(),
+            0,
+            std::ptr::null(),
+            REG_OPTION_NON_VOLATILE,
+            KEY_SET_VALUE,
+            std::ptr::null(),
+            &mut key,
+            std::ptr::null_mut(),
+        );
+        if status != 0 {
+            return Err(std::io::Error::from_raw_os_error(status as i32));
+        }
+        let mut result = Ok(());
+        for (name, value) in &values {
+            let (name, value) = (wide(name), wide(value));
+            let status = RegSetValueExW(key, name.as_ptr(), 0, REG_SZ, value.as_ptr().cast(), (value.len() * 2) as u32);
+            if status != 0 {
+                result = Err(std::io::Error::from_raw_os_error(status as i32));
+            }
+        }
+        RegCloseKey(key);
+        result
     }
 }
 

@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
-use super::{Joiner, StreamRequest, SttEvent, sample_rate};
+use super::{Joiner, StreamRequest, SttEvent, connect_error, lost, sample_rate};
 use crate::{audio, net};
 
 const URL: &str = "wss://api.openai.com/v1/realtime?intent=transcription";
@@ -109,12 +109,11 @@ pub async fn stream(
     events: &mpsc::UnboundedSender<SttEvent>,
 ) -> Result<(), String> {
     let auth = format!("Bearer {}", req.api_key);
-    let mut ws = net::connect_ws(URL, &[("Authorization", &auth)], req.proxy.as_ref())
+    let proxy = req.proxy.as_ref();
+    let mut ws = net::connect_ws(URL, &[("Authorization", &auth)], proxy)
         .await
-        .map_err(|e| format!("connecting to OpenAI: {e}"))?;
-    ws.send(Message::Text(session_update(req).to_string().into()))
-        .await
-        .map_err(|e| format!("starting the OpenAI session: {e}"))?;
+        .map_err(|e| connect_error("OpenAI", &e, proxy))?;
+    ws.send(Message::Text(session_update(req).to_string().into())).await.map_err(|e| lost("OpenAI", &e, proxy))?;
 
     let rate = sample_rate("openai") as u64;
     let b64 = base64::engine::general_purpose::STANDARD;
@@ -134,7 +133,7 @@ pub async fn stream(
                         let len = Duration::from_millis(pcm.len() as u64 / 2 * 1000 / rate);
                         let level = audio::level(&pcm);
                         let msg = json!({"type": "input_audio_buffer.append", "audio": b64.encode(&pcm)});
-                        ws.send(Message::Text(msg.to_string().into())).await.map_err(|e| format!("sending audio: {e}"))?;
+                        ws.send(Message::Text(msg.to_string().into())).await.map_err(|e| lost("OpenAI", &e, proxy))?;
                         seg.push(len, level)
                     }
                     None => {
@@ -146,14 +145,14 @@ pub async fn stream(
                 if commit && seg.buffered >= MIN_COMMIT && seg.spoke {
                     ws.send(Message::Text(json!({"type": "input_audio_buffer.commit"}).to_string().into()))
                         .await
-                        .map_err(|e| format!("sending audio: {e}"))?;
+                        .map_err(|e| lost("OpenAI", &e, proxy))?;
                     commits_in_flight += 1;
                     seg.committed();
                 } else if commit {
                     // Only silence so far: drop it rather than transcribe it.
                     ws.send(Message::Text(json!({"type": "input_audio_buffer.clear"}).to_string().into()))
                         .await
-                        .map_err(|e| format!("sending audio: {e}"))?;
+                        .map_err(|e| lost("OpenAI", &e, proxy))?;
                     seg.committed();
                 }
                 if !audio_open && commits_in_flight == 0 && waiting.is_empty() {
@@ -173,7 +172,7 @@ pub async fn stream(
                         return Err(format!("OpenAI closed the connection {why}").trim().to_owned());
                     }
                     Some(Ok(_)) => continue,
-                    Some(Err(e)) => return Err(format!("connection to OpenAI lost: {e}")),
+                    Some(Err(e)) => return Err(lost("OpenAI", &e, proxy)),
                     None => return Err("OpenAI closed the connection".into()),
                 };
                 let m: ServerMsg = serde_json::from_str(&text).map_err(|e| format!("bad message from OpenAI: {e}"))?;

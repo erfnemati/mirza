@@ -30,4 +30,4 @@ libc = "0.2"
 cpal = "0.18.2"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Media_Audio"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Media_Audio", "Win32_System_Registry"] }
