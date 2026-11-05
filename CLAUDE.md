@@ -31,9 +31,19 @@ Try a provider with a recorded clip (needs ffmpeg and a key in `~/.config/mirza/
 cargo run -p mirza-core --example transcribe -- soniox clip.wav
 ```
 
-The development server has no microphone, display or Android emulator. Shortcuts, typing into
-windows, tray, sounds and anything on a phone can't be tested there: say what was tested where.
-Desktop builds for manual tests come from the Release workflow run by hand (workflow artifacts).
+The development server has no real microphone, no display and no hardware virtualization. Two
+scripts stand in:
+
+- `scripts/dev/virtual-mic.sh start`, then `play clip.m4a`: audio files come out of the default
+  microphone, for Mirza's Linux recorder and for the emulator.
+- `scripts/dev/emulator.sh start | wait | screen F.png | stop`: an Android 16 emulator (SDK in
+  `~/Android/Sdk`) on a virtual screen with software CPU emulation. Slow: a cold boot takes about
+  30 minutes, so let `stop` save the state for a quick boot. Stop it when you're done; the server
+  is shared.
+
+Shortcuts, typing into desktop windows and the tray still need a real desktop, and the emulator
+is too slow to judge how the phone app feels: say what was tested where. Desktop builds for manual
+tests come from the Release workflow run by hand (workflow artifacts).
 
 ## Rules
 
