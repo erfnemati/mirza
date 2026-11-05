@@ -21,6 +21,7 @@ struct Response {
     tokens: Vec<Token>,
     finished: bool,
     error_code: Option<serde_json::Value>,
+    error_type: Option<String>,
     error_message: Option<String>,
 }
 
@@ -33,8 +34,9 @@ struct Token {
 
 pub fn start_message(req: &StreamRequest) -> serde_json::Value {
     let s = &req.settings;
+    // The key goes in the Authorization header: Soniox refuses keys sent only
+    // in this message from 2027-01-15.
     let mut msg = json!({
-        "api_key": req.api_key,
         "model": s.model,
         "audio_format": "pcm_s16le",
         "sample_rate": sample_rate("soniox"),
@@ -59,7 +61,10 @@ pub async fn stream(
     events: &mpsc::UnboundedSender<SttEvent>,
 ) -> Result<(), String> {
     let proxy = req.proxy.as_ref();
-    let mut ws = net::connect_ws(URL, &[], proxy).await.map_err(|e| connect_error("Soniox", &e, proxy))?;
+    let auth = format!("Bearer {}", req.api_key);
+    let mut ws = net::connect_ws(URL, &[("Authorization", &auth)], proxy)
+        .await
+        .map_err(|e| connect_error("Soniox", &e, proxy))?;
     ws.send(Message::Text(start_message(req).to_string().into())).await.map_err(|e| lost("Soniox", &e, proxy))?;
 
     let mut audio_open = true;
@@ -101,11 +106,30 @@ pub async fn stream(
     }
 }
 
+/// Soniox errors people can fix themselves, in plain words. Soniox asks
+/// clients to go by `error_type`; the others keep Soniox's own message.
+fn plain_error(kind: &str) -> Option<&'static str> {
+    Some(match kind {
+        "unauthenticated" => "Soniox didn't accept the API key",
+        "permission_denied" => "This Soniox API key isn't allowed to use real-time transcription",
+        "organization_balance_exhausted" => "Your Soniox balance has run out. Add credit in the Soniox console.",
+        "organization_monthly_budget_exhausted" | "project_monthly_budget_exhausted" => {
+            "Your Soniox monthly budget is used up. Raise it in the Soniox console."
+        }
+        "model_not_available" => "Soniox doesn't offer the chosen model. Pick another one in Settings.",
+        _ => return None,
+    })
+}
+
 /// Turns one response into events. Returns true when the transcript is done.
 fn handle(text: &str, events: &mpsc::UnboundedSender<SttEvent>) -> Result<bool, String> {
     let r: Response = serde_json::from_str(text).map_err(|e| format!("bad response from Soniox: {e}"))?;
     let code = r.error_code.as_ref().filter(|c| !c.is_null() && c.as_i64() != Some(0));
-    if code.is_some() || r.error_message.as_deref().is_some_and(|m| !m.is_empty()) {
+    let kind = r.error_type.as_deref().filter(|t| !t.is_empty());
+    if code.is_some() || kind.is_some() || r.error_message.as_deref().is_some_and(|m| !m.is_empty()) {
+        if let Some(plain) = kind.and_then(plain_error) {
+            return Err(plain.into());
+        }
         let code = code.map(|c| c.to_string()).unwrap_or_default();
         return Err(format!("Soniox error {code}: {}", r.error_message.unwrap_or_default()).replace("  ", " "));
     }
@@ -144,7 +168,8 @@ mod tests {
         settings.terms = vec!["Mirza".into(), " ".into()];
         let req = StreamRequest { provider: "soniox".into(), api_key: "k".into(), settings, proxy: None };
         let m = start_message(&req);
-        assert_eq!(m["model"], "stt-rt-v5");
+        assert_eq!(m["model"], "stt-rt-v6");
+        assert!(m.get("api_key").is_none(), "the key goes in the Authorization header");
         assert_eq!(m["sample_rate"], 16000);
         assert_eq!(m["language_hints"], json!(["fa", "en"]));
         assert_eq!(m["language_hints_strict"], false);
@@ -177,5 +202,17 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let err = handle(r#"{"error_code":401,"error_message":"Invalid API key."}"#, &tx).unwrap_err();
         assert_eq!(err, "Soniox error 401: Invalid API key.");
+        let err = handle(
+            r#"{"tokens":[],"error_code":401,"error_type":"unauthenticated","error_message":"Missing API key."}"#,
+            &tx,
+        )
+        .unwrap_err();
+        assert_eq!(err, "Soniox didn't accept the API key");
+        let err = handle(
+            r#"{"tokens":[],"error_code":503,"error_type":"service_unavailable","error_message":"Try again later."}"#,
+            &tx,
+        )
+        .unwrap_err();
+        assert_eq!(err, "Soniox error 503: Try again later.");
     }
 }

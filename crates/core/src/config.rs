@@ -213,7 +213,7 @@ pub struct Providers {
 impl Default for Providers {
     fn default() -> Self {
         Self {
-            soniox: Provider::new("stt-rt-v5", 0.002),
+            soniox: Provider::new("stt-rt-v6", 0.002),
             elevenlabs: Provider::new("scribe_v2_realtime", 0.0065),
             openai: Provider::new("gpt-live-transcribe", 0.006),
         }
@@ -488,7 +488,7 @@ pub const TEMPLATE: &str = r#"# Mirza settings. Every key is optional; the value
 # follow_focus = true             # pause while another window is active (KDE)
 
 # [providers.soniox]
-# model = "stt-rt-v5"
+# model = "stt-rt-v6"
 # languages = ["fa", "en"]
 # strict_languages = false
 # terms = []                      # names and words to expect
@@ -532,7 +532,7 @@ mod tests {
         assert_eq!(cfg.shortcuts[0].id(), "dictate-hold");
         assert_eq!(cfg.shortcuts[1].mode, Mode::Toggle);
         assert_eq!(cfg.providers.soniox.languages, ["fa"]);
-        assert_eq!(cfg.providers.soniox.model, "stt-rt-v5");
+        assert_eq!(cfg.providers.soniox.model, "stt-rt-v6");
         assert_eq!(cfg.credit["soniox"].amount, 20.0);
         assert_eq!(cfg.provider().model, "gpt-live-transcribe");
     }
@@ -550,7 +550,7 @@ mod tests {
         let cfg = Config::parse(&out).unwrap();
         assert_eq!(cfg.typing.paste_key, "ctrl+v");
         assert_eq!(cfg.providers.soniox.languages, ["fa"]);
-        assert_eq!(cfg.providers.soniox.model, "stt-rt-v5");
+        assert_eq!(cfg.providers.soniox.model, "stt-rt-v6");
         assert_eq!(cfg.credit["soniox"].amount, 20.5);
         assert_eq!(cfg.silence_stop_sec, 30);
         assert_eq!(cfg.shortcuts[0].mode, Mode::Hold);

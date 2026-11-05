@@ -38,7 +38,7 @@ pub fn known(provider: &str) -> Vec<ModelInfo> {
         languages: default_languages(),
     };
     match provider {
-        "soniox" => vec![m("stt-rt-v5", "Speech-to-Text Real-time v5")],
+        "soniox" => vec![m("stt-rt-v6", "Speech-to-Text Real-time v6")],
         "elevenlabs" => vec![m("scribe_v2_realtime", "Scribe v2 Realtime")],
         "openai" => vec![
             m("gpt-live-transcribe", "GPT Live Transcribe"),
@@ -131,16 +131,16 @@ mod tests {
     fn soniox_list_keeps_real_time_models_main_first() {
         let v: serde_json::Value = serde_json::from_str(
             r#"{"models":[
-                {"id":"stt-rt-v4","name":"RT v4","aliased_model_id":"stt-rt-v5","transcription_mode":"real_time","languages":[]},
-                {"id":"stt-async-v5","name":"Async","aliased_model_id":null,"transcription_mode":"async","languages":[]},
-                {"id":"stt-rt-v5","name":"RT v5","aliased_model_id":null,"transcription_mode":"real_time",
+                {"id":"stt-rt-v4","name":"RT v4","aliased_model_id":"stt-rt-v6","transcription_mode":"real_time","languages":[]},
+                {"id":"stt-async-v6","name":"Async","aliased_model_id":null,"transcription_mode":"async","languages":[]},
+                {"id":"stt-rt-v6","name":"RT v6","aliased_model_id":null,"transcription_mode":"real_time",
                  "languages":[{"code":"fa","name":"Persian"}]}]}"#,
         )
         .unwrap();
         let m = soniox_models(&v);
         let ids: Vec<&str> = m.iter().map(|m| m.id.as_str()).collect();
-        assert_eq!(ids, ["stt-rt-v5", "stt-rt-v4"]);
+        assert_eq!(ids, ["stt-rt-v6", "stt-rt-v4"]);
         assert_eq!(m[0].languages[0].code, "fa");
-        assert_eq!(m[1].alias_of.as_deref(), Some("stt-rt-v5"));
+        assert_eq!(m[1].alias_of.as_deref(), Some("stt-rt-v6"));
     }
 }
