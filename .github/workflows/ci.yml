@@ -3,7 +3,7 @@ name: CI
 # Changes to docs alone don't need a build.
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
     paths-ignore: ["**.md", "docs/**", "LICENSE"]
   pull_request:
     paths-ignore: ["**.md", "docs/**", "LICENSE"]
