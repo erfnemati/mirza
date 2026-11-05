@@ -1,14 +1,15 @@
 #!/bin/sh
 # The Android emulator on the dev server, which has no display and no KVM.
 # It runs on a virtual screen (Xvfb) because the headless build has no audio,
-# and with software CPU emulation, which is slow: a cold boot takes about 30
-# minutes, a quick boot from the saved state much less.
+# and with software CPU emulation, which is slow: every start is a cold boot of
+# 10 to 30 minutes. Snapshots are off because a saved one fails to load here
+# ("Length mismatch" on a RAM block), so keep it running while you test.
 # Its microphone is the default PulseAudio source: run scripts/dev/virtual-mic.sh start first.
 #
 #   scripts/dev/emulator.sh start        boot in the background
 #   scripts/dev/emulator.sh wait         wait until Android has booted (up to 45 min)
 #   scripts/dev/emulator.sh screen F.png save a screenshot
-#   scripts/dev/emulator.sh stop         save the state for a quick boot and stop
+#   scripts/dev/emulator.sh stop         stop it
 #
 # MIRZA_AVD (default mirza-test) and MIRZA_EMU_PORT (default 5584) pick another one.
 set -eu
@@ -28,7 +29,7 @@ start)
   "$ADB" start-server >/dev/null 2>&1
   PULSE_SERVER="unix:${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pulse/native" \
     nohup nice -n 15 xvfb-run -a -s "-screen 0 1280x1024x24" "$SDK/emulator/emulator" -avd "$AVD" \
-    -port "$PORT" -no-boot-anim -no-metrics -gpu swiftshader_indirect -accel off -allow-host-audio \
+    -port "$PORT" -no-boot-anim -no-metrics -gpu swiftshader_indirect -accel off -allow-host-audio -no-snapshot \
     >"$LOG" 2>&1 &
   echo "starting $AVD as $DEV (log: $LOG)"
   ;;
