@@ -235,6 +235,17 @@ impl Book {
         }
     }
 
+    /// Reads `text` the way a spoken task is read, without keeping or saving
+    /// anything: for trying the AI in the settings window.
+    pub async fn preview(&self, setup: &Setup, text: &str) -> Result<Draft, String> {
+        let ai = setup.ai.as_ref().ok_or_else(|| setup.ai_problem.clone())?;
+        let lists = self.lists(setup, false).await.unwrap_or_default();
+        let said = Said::now().zoned();
+        let req = parse::request(text, &lists, &setup.settings.list_hints, &setup.terms, &said);
+        let timeout = Duration::from_secs(setup.settings.timeout_sec.max(5));
+        parse::parse(ai, &req, &lists, setup.default_list(), &said, timeout).await.map_err(|e| e.to_string())
+    }
+
     /// Saves one waiting task, or says why it's still waiting.
     pub async fn process(&self, setup: &Setup, id: &str) -> Outcome {
         let _op = self.op.lock().await;

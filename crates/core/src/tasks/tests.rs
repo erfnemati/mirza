@@ -161,6 +161,20 @@ async fn without_ai_the_words_are_saved_as_said() {
 }
 
 #[tokio::test]
+async fn a_preview_saves_nothing() {
+    let m = serve(vec![both(), lists(), ai(json!({"date": "", "time": ""}))]).await;
+    let s = setup(&m, true);
+    let (b, dir) = book();
+    let d = b.preview(&s, SAY).await.unwrap();
+    assert_eq!((d.title.as_str(), d.list.as_str(), d.date), ("Call Sara", "L2", None));
+    assert!(b.waiting().is_empty() && b.recent().is_empty());
+    assert_eq!(calls(&m), ["POST /token", "GET /tasks/v1/users/@me/lists", "POST /v1/chat/completions"]);
+    let err = b.preview(&setup(&m, false), SAY).await.unwrap_err();
+    assert_eq!(err, "no AI is chosen for voice tasks");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
 async fn offline_tasks_wait_and_are_saved_later() {
     let down = reply(503, r#"{"error":{"code":503,"message":"Backend Error"}}"#);
     let m = serve(vec![both(), down, lists(), ai(json!({"time": ""})), task("T1")]).await;

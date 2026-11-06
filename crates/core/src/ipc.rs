@@ -230,4 +230,21 @@ mod tests {
         assert_eq!(r, Request::SetProvider { id: "openai".into() });
         assert_eq!(serde_json::to_string(&Reply::ok()).unwrap(), r#"{"ok":true}"#);
     }
+
+    #[test]
+    fn task_edits_from_the_settings_window() {
+        let sent = r#"{"cmd":"edit_task","id":"t1","edit":{"title":"Call Sara","note":"","list":"L2",
+            "date":"2026-11-09","time":"09:30:00","minutes":0}}"#;
+        let Request::EditTask { id, edit } = serde_json::from_str(sent).unwrap() else { panic!("not an edit") };
+        assert_eq!(id, "t1");
+        assert_eq!(
+            (edit.date, edit.time),
+            (Some(jiff::civil::date(2026, 11, 9)), Some(jiff::civil::time(9, 30, 0, 0)))
+        );
+        let none = r#"{"cmd":"edit_task","id":"t1","edit":{"title":"x","date":null,"time":null}}"#;
+        let Request::EditTask { edit, .. } = serde_json::from_str(none).unwrap() else { panic!("not an edit") };
+        assert_eq!((edit.date, edit.time, edit.list.as_str()), (None, None, ""));
+        let r: Request = serde_json::from_str(r#"{"cmd":"task_lists"}"#).unwrap();
+        assert_eq!(r, Request::TaskLists { refresh: false });
+    }
 }

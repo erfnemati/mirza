@@ -12,7 +12,9 @@ use mirza_core::ipc::{self, Reply, Request, Snapshot};
 use mirza_core::models;
 use mirza_core::{net, secrets};
 use serde::Serialize;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
+
+mod tasks;
 
 #[derive(Serialize)]
 struct KeyInfo {
@@ -319,11 +321,17 @@ fn main() {
             unsafe { std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1") };
         }
     }
+    let args: Vec<String> = std::env::args().collect();
+    *tasks::EDIT_ON_START.lock().unwrap_or_else(|e| e.into_inner()) = tasks::edit_arg(&args);
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, _| {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.unminimize();
                 let _ = w.set_focus();
+            }
+            // Edit, from a task's notification while the window is open.
+            if let Some(id) = tasks::edit_arg(&args) {
+                let _ = app.emit("edit-task", id);
             }
         }))
         .invoke_handler(tauri::generate_handler![
@@ -344,7 +352,17 @@ fn main() {
             try_revision,
             languages,
             log,
-            debug_enabled
+            debug_enabled,
+            tasks::tasks_state,
+            tasks::task_lists,
+            tasks::try_task,
+            tasks::edit_task_on_start,
+            tasks::google_client,
+            tasks::google_client_remove,
+            tasks::google_sign_in,
+            tasks::google_sign_in_paste,
+            tasks::google_sign_in_cancel,
+            tasks::google_sign_out
         ])
         .run(tauri::generate_context!())
         .expect("running the settings window");
