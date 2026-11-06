@@ -30,6 +30,9 @@ pub enum Action {
     OpenConfigFile,
     /// Open the download page of a newer release.
     OpenUpdate,
+    /// Take back, or change, the last voice task.
+    UndoTask,
+    EditTask,
     Quit,
 }
 
@@ -46,6 +49,19 @@ pub struct TrayView {
     pub frame: u8,
     /// The version of a newer release; empty when there is none.
     pub update: String,
+    /// The title of the last voice task, for Undo and Edit; empty when none.
+    pub last_task: String,
+}
+
+impl TrayView {
+    /// "Undo task: Call Sara", shortened for the menu.
+    pub fn task_label(&self, verb: &str) -> String {
+        let mut t: String = self.last_task.chars().take(32).collect();
+        if t.chars().count() < self.last_task.chars().count() {
+            t.push('…');
+        }
+        format!("{verb} task: {t}")
+    }
 }
 
 impl TrayView {

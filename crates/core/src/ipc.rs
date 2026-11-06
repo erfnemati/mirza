@@ -39,6 +39,30 @@ pub enum Request {
     TestSound,
     /// Forgets the recent transcripts.
     ClearHistory,
+    /// Starts saying a task, or stops if already listening.
+    ToggleTask,
+    /// Saves a task from text, as if it was said. `data` has its id.
+    AddTask {
+        text: String,
+    },
+    /// The waiting and the recently saved tasks, in `data`.
+    Tasks,
+    /// The account's Google Tasks lists, in `data`.
+    TaskLists {
+        #[serde(default)]
+        refresh: bool,
+    },
+    /// Takes a task back.
+    UndoTask {
+        id: String,
+    },
+    /// Changes a task; `data` has the outcome.
+    EditTask {
+        id: String,
+        edit: crate::tasks::Edit,
+    },
+    /// Reads the Google sign-in again and tries every waiting task now.
+    RetryTasks,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -50,14 +74,20 @@ pub struct Reply {
     pub status: Option<Status>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snapshot: Option<Snapshot>,
+    /// What a request asked for, when it isn't status or snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
 }
 
 impl Reply {
     pub fn ok() -> Self {
-        Self { ok: true, message: String::new(), status: None, snapshot: None }
+        Self { ok: true, message: String::new(), status: None, snapshot: None, data: None }
     }
     pub fn err(message: impl Into<String>) -> Self {
-        Self { ok: false, message: message.into(), status: None, snapshot: None }
+        Self { ok: false, message: message.into(), status: None, snapshot: None, data: None }
+    }
+    pub fn data(v: serde_json::Value) -> Self {
+        Self { data: Some(v), ..Self::ok() }
     }
 }
 

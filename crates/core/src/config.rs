@@ -91,6 +91,8 @@ pub enum Action {
     Cancel,
     Panel,
     NextProvider,
+    /// Say a task; it goes to Google Tasks (see `tasks`).
+    Task,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -120,6 +122,7 @@ impl Shortcut {
         match self.action {
             Action::Dictate => format!("dictate-{}", if self.mode == Mode::Hold { "hold" } else { "toggle" }),
             Action::Revise => format!("revise-{}", if self.mode == Mode::Hold { "hold" } else { "toggle" }),
+            Action::Task => format!("task-{}", if self.mode == Mode::Hold { "hold" } else { "toggle" }),
             Action::Cancel => "cancel".into(),
             Action::Panel => "panel".into(),
             Action::NextProvider => "next-provider".into(),
@@ -132,6 +135,8 @@ impl Shortcut {
             (Action::Dictate, Mode::Hold) => "Dictate while held",
             (Action::Revise, Mode::Toggle) => "Start or stop dictation, revised with AI",
             (Action::Revise, Mode::Hold) => "Dictate while held, revised with AI",
+            (Action::Task, Mode::Toggle) => "Start or stop saying a task",
+            (Action::Task, Mode::Hold) => "Say a task while held",
             (Action::Cancel, _) => "Cancel dictation",
             (Action::Panel, _) => "Open Mirza settings",
             (Action::NextProvider, _) => "Switch to the next speech-to-text provider",
@@ -438,7 +443,7 @@ pub fn set_shortcuts(doc: &mut toml_edit::DocumentMut, list: &[Shortcut]) {
             serde_json::to_value(sc.action).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default();
         t["action"] = toml_edit::value(action);
         t["keys"] = toml_edit::value(sc.keys.as_str());
-        if matches!(sc.action, Action::Dictate | Action::Revise) {
+        if matches!(sc.action, Action::Dictate | Action::Revise | Action::Task) {
             t["mode"] = toml_edit::value(if sc.mode == Mode::Hold { "hold" } else { "toggle" });
         }
         arr.push(t);
@@ -472,7 +477,7 @@ pub const TEMPLATE: &str = r#"# Mirza settings. Every key is optional; the value
 # Global shortcuts; `mode` is "toggle" or "hold". Without this section the
 # defaults are Ctrl+Alt+H (start/stop) and Ctrl+Alt+J (hold to talk).
 # [[shortcuts]]
-# action = "dictate"              # dictate, revise, cancel, panel or next_provider
+# action = "dictate"              # dictate, revise, task, cancel, panel or next_provider
 # keys = "Ctrl+Alt+H"
 # mode = "toggle"
 #

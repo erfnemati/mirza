@@ -2577,6 +2577,7 @@ dependencies = [
 name = "mirza"
 version = "0.1.5"
 dependencies = [
+ "futures-util",
  "ksni",
  "mirza-core",
  "mirza-hotkey",
