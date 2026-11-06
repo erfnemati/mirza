@@ -1,9 +1,10 @@
 //! Microphone capture as raw s16le mono audio at the rate a provider wants, in
 //! 50 ms chunks, and the short sounds played when dictation starts and stops.
 
-#[cfg(not(target_os = "linux"))]
+// Android records in the app and passes the audio in, so it has no Recorder.
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 mod cpal;
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 pub use self::cpal::{Recorder, devices};
 #[cfg(target_os = "linux")]
 mod linux;
