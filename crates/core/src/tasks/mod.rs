@@ -137,6 +137,9 @@ fn backoff_ms(attempts: u32) -> i64 {
 /// How long a task that needs you waits before Mirza looks again.
 const STUCK_MS: i64 = 15 * 60 * 1000;
 
+/// At most this many tasks wait for the phone to be unlocked.
+pub const HELD_MAX: usize = 10;
+
 fn now_ms() -> i64 {
     jiff::Timestamp::now().as_millisecond()
 }
@@ -181,6 +184,28 @@ impl Book {
         tracing::info!("kept a spoken task ({} words) as {}", e.text.split_whitespace().count(), e.id);
         tracing::debug!("task text: {:?}", e.text);
         Ok(e)
+    }
+
+    /// Keeps a task said on the lock screen. Nothing goes to the AI or to
+    /// Google until it's confirmed with [`Book::release`] (or edited); Undo
+    /// drops it. At most `limit` (1 to [`HELD_MAX`]) wait at once.
+    pub fn hold(&self, text: &str, said: Said, limit: usize) -> Result<Entry, String> {
+        let limit = limit.clamp(1, HELD_MAX);
+        if self.store.queue().iter().filter(|e| e.held).count() >= limit {
+            return Err(format!(
+                "{limit} tasks are already waiting for the phone to be unlocked. Unlock it to confirm or drop them."
+            ));
+        }
+        self.capture(text, said, true).map_err(|e| format!("Can't keep the task: {e}"))
+    }
+
+    /// Confirms a task kept on the lock screen, so it's saved like any other.
+    /// False when there's no such task waiting to be confirmed.
+    pub fn release(&self, id: &str) -> bool {
+        let Some(mut e) = self.store.get(id).filter(|e| e.held) else { return false };
+        e.held = false;
+        e.next_try_ms = 0;
+        self.store.put(&e).is_ok()
     }
 
     /// Tasks waiting to be saved, oldest first.

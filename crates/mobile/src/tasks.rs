@@ -6,6 +6,7 @@
 //! call them from a background thread (Kotlin: `Dispatchers.IO`).
 
 use std::collections::{BTreeMap, HashMap};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
@@ -41,6 +42,9 @@ pub struct TaskConfig {
     pub terms: Vec<String>,
     /// The phone's time zone, e.g. "Asia/Tehran"; "" for the system's.
     pub time_zone: String,
+    /// How many tasks said on the lock screen may wait for the phone to be
+    /// unlocked: 1 to 10, and 0 means 10.
+    pub held_limit: u32,
 }
 
 /// Gives Google access tokens from the app's own sign-in. Called from a
@@ -96,6 +100,9 @@ pub struct WaitingTask {
     pub next_try_ms: i64,
     pub last_error: String,
     pub draft: Option<TaskDraft>,
+    /// Said on the lock screen and not confirmed yet: see
+    /// [`TaskBook::capture_held`].
+    pub held: bool,
 }
 
 /// A task Google has.
@@ -117,7 +124,7 @@ pub enum TaskState {
     Waiting,
     /// Kept, but the user must act first (sign in, turn on an API).
     Stuck,
-    /// It was saved or undone already.
+    /// It was saved or undone already, or it waits for confirmation.
     Gone,
 }
 
@@ -197,6 +204,7 @@ pub struct TaskBook {
     tokens: Arc<dyn TokenProvider>,
     setup: RwLock<Arc<Setup>>,
     time_zone: RwLock<String>,
+    held_limit: AtomicU32,
 }
 
 impl TaskBook {
@@ -239,6 +247,7 @@ impl TaskBook {
             tokens,
             setup: RwLock::new(Arc::new(setup)),
             time_zone: RwLock::new(config.time_zone),
+            held_limit: AtomicU32::new(config.held_limit),
         }))
     }
 
@@ -247,6 +256,7 @@ impl TaskBook {
         let s = setup(&config, self.tokens.clone())?;
         *self.setup.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(s);
         *self.time_zone.write().unwrap_or_else(|e| e.into_inner()) = config.time_zone;
+        self.held_limit.store(config.held_limit, Ordering::Relaxed);
         Ok(())
     }
 
@@ -262,6 +272,30 @@ impl TaskBook {
             .capture(&text, Said::at(jiff_now_ms(), &tz), false)
             .map_err(|e| MobileError::Settings(format!("Can't keep the task on the phone: {e}")))?;
         Ok(waiting_out(&e))
+    }
+
+    /// Keeps a task said on the lock screen, on disk only: nothing goes to
+    /// the AI or to Google, and no retry touches it, until [`TaskBook::confirm`]
+    /// (or [`TaskBook::edit`]). [`TaskBook::undo`] drops it. Fails when
+    /// `held_limit` tasks are already waiting. Fast.
+    pub fn capture_held(&self, text: String) -> Result<WaitingTask, MobileError> {
+        if text.trim().is_empty() {
+            return Err(MobileError::Settings("Nothing was heard.".into()));
+        }
+        let tz = self.time_zone.read().unwrap_or_else(|e| e.into_inner()).clone();
+        let limit = match self.held_limit.load(Ordering::Relaxed) {
+            0 => tasks::HELD_MAX,
+            n => n as usize,
+        };
+        let e = self.book.hold(&text, Said::at(jiff_now_ms(), &tz), limit).map_err(MobileError::Settings)?;
+        Ok(waiting_out(&e))
+    }
+
+    /// Confirms a task kept on the lock screen; then save it with
+    /// [`TaskBook::process`] (or [`TaskBook::process_due`] for all of them).
+    /// False when it isn't waiting for confirmation. Fast.
+    pub fn confirm(&self, id: String) -> bool {
+        self.book.release(&id)
     }
 
     /// Saves one task: AI reading, Google Tasks, Calendar. Blocks.
@@ -352,6 +386,7 @@ fn waiting_out(e: &tasks::Entry) -> WaitingTask {
         next_try_ms: e.next_try_ms,
         last_error: e.last_error.clone(),
         draft: e.draft.as_ref().map(draft_out),
+        held: e.held,
     }
 }
 
@@ -380,6 +415,7 @@ mod tests {
             timed_due_date: true,
             terms: vec![],
             time_zone: "Asia/Tehran".into(),
+            held_limit: 0,
         }
     }
 
@@ -412,6 +448,29 @@ mod tests {
         book.undo(w.id).unwrap();
         assert!(book.waiting().is_empty());
         assert!(book.update(TaskConfig { ai_provider: "nope".into(), ..config(&dir) }).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn lock_screen_tasks_wait_until_confirmed() {
+        let dir = std::env::temp_dir().join(format!("mirza-mobile-held-{}", jiff_now_ms()));
+        let book = TaskBook::new(TaskConfig { held_limit: 1, ..config(&dir) }, Box::new(NoSignIn)).unwrap();
+        let w = book.capture_held("buy milk".into()).unwrap();
+        assert!(w.held);
+        assert!(book.capture_held("call Sara".into()).is_err(), "the limit is 1");
+        assert!(book.process_due().is_empty());
+        assert_eq!(book.process(w.id.clone()).state, TaskState::Gone);
+        assert_eq!(book.next_due_ms(), None);
+
+        assert!(book.confirm(w.id.clone()));
+        assert!(!book.waiting()[0].held);
+        assert_eq!(book.process(w.id.clone()).state, TaskState::Stuck, "not signed in");
+        book.update(config(&dir)).unwrap();
+        book.undo(w.id).unwrap();
+        for _ in 0..tasks::HELD_MAX {
+            book.capture_held("x".into()).unwrap();
+        }
+        assert!(book.capture_held("x".into()).is_err(), "0 means 10");
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

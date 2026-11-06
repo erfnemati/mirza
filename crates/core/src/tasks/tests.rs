@@ -228,6 +228,33 @@ async fn a_task_whose_answer_was_lost_is_not_sent_twice() {
 }
 
 #[tokio::test]
+async fn lock_screen_tasks_wait_for_confirmation() {
+    let m = serve(vec![both(), lists(), task("T1")]).await;
+    let s = setup(&m, false);
+    let (b, dir) = book();
+    let first = b.hold("buy milk", said(), 2).unwrap();
+    let second = b.hold("call Sara", said(), 2).unwrap();
+    let err = b.hold("one more", said(), 2).unwrap_err();
+    assert!(err.starts_with("2 tasks are already waiting"), "{err}");
+    assert!(b.hold("one more", said(), 0).is_err(), "a limit under 1 counts as 1");
+
+    // Nothing goes anywhere before it's confirmed.
+    assert!(b.process_due(&s).await.is_empty());
+    assert!(matches!(b.process(&s, &first.id).await, Outcome::Gone(_)));
+    assert_eq!(b.next_due_ms(), None);
+    assert!(calls(&m).is_empty());
+
+    b.undo(&s, &second.id).await.unwrap();
+    assert!(calls(&m).is_empty(), "dropping a held task needs no Google");
+    assert!(b.release(&first.id));
+    assert!(!b.release(&first.id), "already confirmed");
+    let out = b.process_due(&s).await;
+    assert_eq!(saved(out.into_iter().next().unwrap()).draft.title, "buy milk");
+    assert!(b.waiting().is_empty());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
 async fn signed_out_tasks_are_kept() {
     let m = serve(vec![]).await;
     let mut s = setup(&m, true);
