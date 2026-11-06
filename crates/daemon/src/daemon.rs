@@ -404,11 +404,7 @@ impl Daemon {
             let client =
                 mirza_core::ai::Client::new(kind, cfg.ai.get(kind), key, proxy.as_ref(), Duration::from_secs(600))
                     .map_err(|e| e.to_string())?;
-            let hints = Hints {
-                languages: settings.languages.clone(),
-                terms: settings.terms.clone(),
-                instructions: cfg.revision.instructions.clone(),
-            };
+            let hints = Hints::new(&cfg.revision, settings.languages.clone(), settings.terms.clone());
             Some(Revision {
                 client,
                 hints,

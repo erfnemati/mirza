@@ -1,7 +1,7 @@
 # AI revision
 
-Mirza can send what you said to an AI model before typing it. The model cleans it up and
-nothing more:
+Mirza can send what you said to an AI model before typing it. By default the model cleans it
+up and nothing more:
 
 - drops fillers and hesitations (um, uh, «اِ», «خب», «یعنی» when they mean nothing);
 - drops words repeated by mistake («و و و», "the the");
@@ -10,6 +10,8 @@ nothing more:
 - adds punctuation, and Persian half-spaces where they belong («می‌خوام», «کتاب‌ها»);
 - keeps every word in the language you spoke it in. It never translates, and colloquial
   Persian stays colloquial.
+
+You can also let it polish the wording (see [How much it changes](#how-much-it-changes)).
 
 It is off by default and has its own shortcut, so normal dictation stays as fast as before. If
 the AI is slow, fails, or sends back something that doesn't look like your text (much longer,
@@ -35,6 +37,34 @@ to the clipboard instead; elsewhere it is typed wherever you are.
 
 **Recent text** shows both versions, so you can copy what you actually said if the revision
 went wrong.
+
+## How much it changes
+
+Pick one level under **How much to change**:
+
+- **Clean only** (the default): what's listed at the top. Your words stay as you said them.
+- **Light polish**: also fixes grammar mistakes and awkward word order, splits run-on sentences
+  and finishes sentences you broke off, changing as few words as it can.
+- **Full polish**: rewrites it the way you'd have written it. Spoken lead-ins like "so
+  basically, what I'm trying to say is" or «ببین» go, sentences get reordered and tightened,
+  and things said twice are said once. Every point, name and number stays.
+
+No level adds line breaks or paragraphs. Mirza types a line break as Enter, which would send a
+half-finished message in a chat app, so any line breaks the AI adds become spaces.
+
+The switches under the levels add ready-made rules, in any combination:
+
+- **Plain words**: no words that make text sound AI-written (delve, leverage, robust,
+  seamless...) and no jargon or bookish words, in English or Persian. Technical terms like API
+  or PR stay.
+- **Formal Persian**: written Persian instead of spoken («می‌خوام» becomes «می‌خواهم», «اون»
+  becomes «آن»), without changing who is spoken to («بفرست» stays «بفرست»).
+- **Numbers as digits**: Persian digits in Persian sentences, 0-9 in English ones. «صد و
+  پنجاه هزار» becomes «۱۵۰ هزار». «یه» and "a", and words like "third", stay words.
+- **No dashes or emoji**: commas and periods instead of dashes between sentences.
+
+These win over the level's own rules. With Formal Persian on, for example, Clean only still
+turns spoken Persian into written Persian.
 
 ## Privacy
 
@@ -100,8 +130,8 @@ server is on a public address or a domain like `ai.example.com`, it goes through
   the setting, choose **The model's default**.
 - **Time limit**: how long to wait for the AI, 10 seconds by default. Longer dictations get a
   second more for every 30 words over 100. When the time is up, the unrevised text is typed.
-- **Your own rules**: anything else you want, in plain words, for example "Write numbers as
-  digits" or "Use formal Persian". These win over Mirza's own rules.
+- **Your own rules**: anything else you want, in plain words, for example "Use British
+  spelling". These win over Mirza's rules and the switches.
 
 The custom words from your speech service settings are passed on too, so names are spelled
 the way you want them.

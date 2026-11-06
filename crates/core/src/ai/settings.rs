@@ -137,6 +137,49 @@ impl From<AiProvidersFile> for AiProviders {
     }
 }
 
+/// How much the AI may change what you said.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Style {
+    /// Fillers, repeats, corrections, punctuation and half-spaces; your words stay.
+    #[default]
+    Clean,
+    /// Also grammar and awkward phrasing, with as few changes as it can.
+    Light,
+    /// Also reorders and tightens sentences so it reads like written text.
+    Full,
+}
+
+/// Ready-made rules that can be switched on in the settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Preset {
+    /// No words that sound machine-written, no jargon or bookish words.
+    PlainWords,
+    /// Written Persian instead of spoken.
+    FormalPersian,
+    /// Numbers as digits.
+    Digits,
+    /// No dashes between clauses, no emoji.
+    NoDashes,
+}
+
+impl Preset {
+    pub const ALL: [Preset; 4] = [Preset::PlainWords, Preset::FormalPersian, Preset::Digits, Preset::NoDashes];
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Preset::PlainWords => "plain_words",
+            Preset::FormalPersian => "formal_persian",
+            Preset::Digits => "digits",
+            Preset::NoDashes => "no_dashes",
+        }
+    }
+
+    pub fn parse(id: &str) -> Option<Preset> {
+        Preset::ALL.into_iter().find(|p| p.id() == id.trim())
+    }
+}
+
 /// Revising dictation with AI.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -146,13 +189,24 @@ pub struct Revision {
     /// Give up and type the original text after this many seconds. Long
     /// dictations get a little more.
     pub timeout_sec: u64,
-    /// Your own rules, added to Mirza's, e.g. "Write numbers as digits".
+    /// How much the AI may change the text.
+    pub style: Style,
+    /// Ready-made rules by id (see [`Preset`]). Names this version doesn't
+    /// know are skipped, so a newer config still loads.
+    pub presets: Vec<String>,
+    /// Your own rules, added to Mirza's, e.g. "Use British spelling".
     pub instructions: String,
 }
 
 impl Default for Revision {
     fn default() -> Self {
-        Self { provider: String::new(), timeout_sec: 10, instructions: String::new() }
+        Self {
+            provider: String::new(),
+            timeout_sec: 10,
+            style: Style::Clean,
+            presets: Vec::new(),
+            instructions: String::new(),
+        }
     }
 }
 
@@ -160,6 +214,11 @@ impl Revision {
     /// The chosen provider, or None when revision is off or the name is wrong.
     pub fn kind(&self) -> Option<Kind> {
         Kind::parse(&self.provider)
+    }
+
+    /// The presets that are switched on, in a fixed order, once each.
+    pub fn presets(&self) -> Vec<Preset> {
+        Preset::ALL.into_iter().filter(|p| self.presets.iter().any(|id| Preset::parse(id) == Some(*p))).collect()
     }
 }
 
@@ -177,5 +236,20 @@ mod tests {
         assert_eq!(p.gemini, AiProviders::default().gemini);
         assert!(toml::from_str::<AiProviders>("[claude]\nmodle = \"x\"").is_err());
         assert!(toml::from_str::<AiProviders>("[claude]\neffort = \"max\"").is_err());
+    }
+
+    #[test]
+    fn style_and_presets() {
+        let r: Revision = toml::from_str(
+            "style = \"full\"\npresets = [\"no_dashes\", \"from_the_future\", \"plain_words\", \"no_dashes\"]",
+        )
+        .unwrap();
+        assert_eq!(r.style, Style::Full);
+        assert_eq!(r.presets(), [Preset::PlainWords, Preset::NoDashes]);
+        assert_eq!(Revision::default().style, Style::Clean);
+        assert!(toml::from_str::<Revision>("style = \"heavy\"").is_err());
+        for p in Preset::ALL {
+            assert_eq!(Preset::parse(p.id()), Some(p));
+        }
     }
 }

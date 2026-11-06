@@ -21,3 +21,8 @@ can you can you send me the the report by Friday
 این بزرگ ترین مشکلیه که داریم و باید زودتر حلش کنیم
 the meeting went well I think we should um move forward with the second option
 لطفا یه ایمیل به تیم بفرست و بگو که release هفته ی بعده
+# Longer and rambling, for light and full polish:
+خب ببین من فکر می کنم که ما باید این پروژه رو یه جوری اِ یه جوری تقسیم کنیم به چند تا بخش کوچیک تر چون الان خیلی بزرگه و هیچ کس نمی دونه از کجا شروع کنه یعنی اول باید ببینیم کدوم بخش ها مهم ترن بعد اونا رو اول انجام بدیم و بقیه رو بذاریم برای بعد
+so basically what I'm trying to say is that the new onboarding flow is kind of confusing for users because there are like too many steps and um people drop off at the third step where we ask for the phone number so I think we should maybe make the phone number optional or move it to later
+جلسه ی بعدی ساعت سه و نیم روز دوشنبه است و باید بیست و پنج تا slide آماده کنیم و حدود دو میلیون تومن budget داریم
+we need to leverage our robust infrastructure to seamlessly navigate the evolving landscape of customer needs and it's crucial that we foster synergy between teams

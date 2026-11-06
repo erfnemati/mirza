@@ -128,7 +128,7 @@ async fn try_revision(text: String) -> Result<Tried, String> {
     let timeout = revise::timeout_for(&text, cfg.revision.timeout_sec);
     let client = ai_client(&cfg, kind, timeout)?;
     let stt = cfg.providers.get(&cfg.active_provider).cloned().unwrap_or_else(|| cfg.providers.soniox.clone());
-    let hints = revise::Hints { languages: stt.languages, terms: stt.terms, instructions: cfg.revision.instructions };
+    let hints = revise::Hints::new(&cfg.revision, stt.languages, stt.terms);
     let started = std::time::Instant::now();
     let text = revise::revise(&client, &text, &hints).await.map_err(|e| e.to_string())?;
     let text = if cfg.typing.persian_letters { mirza_core::normalize::persian_letters(&text) } else { text };

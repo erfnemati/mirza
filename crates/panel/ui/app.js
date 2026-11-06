@@ -26,6 +26,21 @@ const AI_PROVIDERS = [
   { id: "local", name: "Local server", blurb: "vLLM, Ollama, LM Studio", env: "MIRZA_LOCAL_API_KEY", optionalKey: true, models: [] },
 ];
 
+/** How much AI revision may change, and the ready-made rules (ids match the config). */
+const REVISION_STYLES = [
+  { id: "clean", name: "Clean only", blurb: "Fillers, repeats, punctuation. Your words stay." },
+  { id: "light", name: "Light polish", blurb: "Also grammar and run-on sentences, few changes." },
+  { id: "full", name: "Full polish", blurb: "Reads like written text. Every point stays." },
+];
+/** Persian inside an English sentence, kept right to left so its «» don't flip. */
+const fa = (text) => h("bdi", { textContent: text, attrs: { dir: "rtl" } });
+const REVISION_PRESETS = [
+  { id: "plain_words", name: "Plain words", desc: () => "No words that sound AI-written (delve, leverage, robust…) and no jargon or bookish words." },
+  { id: "formal_persian", name: "Formal Persian", desc: () => h("span", {}, "Written Persian instead of spoken: ", fa("«می‌خوام»"), " becomes ", fa("«می‌خواهم»"), ".") },
+  { id: "digits", name: "Numbers as digits", desc: () => h("span", {}, fa("«صد و پنجاه هزار»"), " becomes ", fa("«۱۵۰ هزار»"), ", “twenty” becomes 20.") },
+  { id: "no_dashes", name: "No dashes or emoji", desc: () => "Commas and periods instead of dashes between sentences." },
+];
+
 const SECTIONS = [
   { id: "provider", label: "Speech service", icon: "waves" },
   { id: "shortcuts", label: "Shortcuts", icon: "keyboard" },
@@ -574,7 +589,39 @@ function pageRevision() {
     }),
   );
 
-  const rules = h("textarea", { class: "input", rows: 3, placeholder: "For example: Write numbers as digits.", value: r.instructions, attrs: { dir: "auto", "aria-label": "Your own rules" } });
+  const styles = h(
+    "div",
+    { class: "choices", attrs: { role: "radiogroup", "aria-label": "How much to change" } },
+    ...REVISION_STYLES.map((it) =>
+      h(
+        "button",
+        {
+          class: "choice",
+          type: "button",
+          attrs: { role: "radio", "aria-checked": String(it.id === r.style) },
+          onclick: () => it.id !== r.style && save("revision.style", it.id, { rerender: true }),
+        },
+        h("strong", { textContent: it.name }),
+        h("span", { textContent: it.blurb }),
+      ),
+    ),
+  );
+  const presetRows = REVISION_PRESETS.map((p) =>
+    row({
+      label: p.name,
+      desc: p.desc(),
+      control: switchEl(r.presets.includes(p.id), (on) => {
+        // The page isn't redrawn after a switch, so read what is saved now.
+        const now = state.cfg.revision.presets;
+        const ids = REVISION_PRESETS.map((x) => x.id).filter((id) => (id === p.id ? on : now.includes(id)));
+        // Keep ids a newer version wrote, so switching here doesn't drop them.
+        const others = now.filter((id) => !REVISION_PRESETS.some((x) => x.id === id));
+        save("revision.presets", [...ids, ...others]);
+      }, p.name),
+    }),
+  );
+
+  const rules = h("textarea", { class: "input", rows: 3, placeholder: "For example: Use British spelling.", value: r.instructions, attrs: { dir: "auto", "aria-label": "Your own rules" } });
   rules.addEventListener("change", () => save("revision.instructions", rules.value.trim()));
 
   const tryBox = h("textarea", { class: "input", rows: 3, placeholder: "Type or paste something the way you'd say it, fillers and all.", value: state.tryText, attrs: { dir: "auto", "aria-label": "Text to try" } });
@@ -614,15 +661,24 @@ function pageRevision() {
     advanced,
     group(
       row({
+        label: "How much to change",
+        desc: "Polish takes a little longer. Line breaks are never added, since Enter would send a chat message.",
+        stack: true,
+        control: styles,
+      }),
+      ...presetRows,
+      row({
+        label: "Your own rules",
+        desc: "Added to Mirza's rules and the switches above, and they win over them.",
+        stack: true,
+        control: rules,
+      }),
+    ),
+    group(
+      row({
         label: "Time limit",
         desc: "If the AI hasn't answered by then, the original text is typed. Long dictations get a little more.",
         control: h("div", { class: "row-control" }, numberInput(r.timeout_sec, (v) => save("revision.timeout_sec", v), { min: 1, max: 120, label: "Time limit in seconds" }), h("span", { class: "unit", textContent: "s" })),
-      }),
-      row({
-        label: "Your own rules",
-        desc: "Added to Mirza's rules, and they win over them.",
-        stack: true,
-        control: rules,
       }),
     ),
     group(

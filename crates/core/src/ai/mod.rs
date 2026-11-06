@@ -25,7 +25,7 @@ use serde_json::Value;
 use url::Url;
 
 pub use error::{AiError, ErrorKind};
-pub use settings::{AiProvider, AiProviders, Effort, Revision};
+pub use settings::{AiProvider, AiProviders, Effort, Preset, Revision, Style};
 
 /// The AI providers Mirza can use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

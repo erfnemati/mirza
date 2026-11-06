@@ -511,7 +511,9 @@ pub const TEMPLATE: &str = r#"# Mirza settings. Every key is optional; the value
 # [revision]
 # provider = ""                   # openai, gemini, claude, openrouter or local
 # timeout_sec = 10                # longer dictations get a little more
-# instructions = ""               # your own rules, e.g. "Write numbers as digits."
+# style = "clean"                 # clean, light (polish) or full (polish)
+# presets = []                    # plain_words, formal_persian, digits, no_dashes
+# instructions = ""               # your own rules, e.g. "Use British spelling."
 
 # Each AI provider's model; base_url "" means the provider's own address.
 # effort: default, none, minimal, low, medium or high (how much it may think).
