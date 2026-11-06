@@ -15,6 +15,8 @@ pub enum ErrorKind {
     Forbidden,
     Credit,
     RateLimited,
+    /// A limit per day, such as Gemini's free tier.
+    DailyLimit,
     Region,
     ModelNotFound,
     BadRequest,
@@ -71,6 +73,11 @@ impl fmt::Display for AiError {
             }
             ErrorKind::RateLimited => {
                 format!("{name} is getting too many requests{detail}. Wait a moment and try again.")
+            }
+            ErrorKind::DailyLimit => {
+                format!(
+                    "{name}'s daily limit is used up{detail}. Try again tomorrow, or raise the limit on its website."
+                )
             }
             ErrorKind::Region if self.proxied => {
                 format!("{name} isn't offered where your proxy connects from{detail}. Try a proxy in another country.")
@@ -194,5 +201,14 @@ mod tests {
         assert!(e(ErrorKind::NoKey, Kind::Gemini, false).contains("mirza set-key gemini"));
         let d = AiError::new(ErrorKind::KeyRejected, Kind::OpenAi, "Incorrect API key".into(), false).to_string();
         assert_eq!(d, "OpenAI didn't accept the API key (Incorrect API key). Check it in Settings > AI revision.");
+        let free = "the free tier allows 15 requests a minute".to_owned();
+        assert_eq!(
+            AiError::new(ErrorKind::RateLimited, Kind::Gemini, free, true).to_string(),
+            "Gemini is getting too many requests (the free tier allows 15 requests a minute). Wait a moment and try again."
+        );
+        assert!(
+            e(ErrorKind::DailyLimit, Kind::Gemini, true)
+                .starts_with("Gemini's daily limit is used up. Try again tomorrow")
+        );
     }
 }

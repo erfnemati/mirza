@@ -93,7 +93,9 @@ Notes per provider:
 
 - **Gemini**: isn't offered in some countries; if you get a message about your region, use a
   proxy in a country it serves. Check Google's terms for whether free-tier text is used to
-  improve its models.
+  improve its models. The free tier has a limit per minute and per day; for
+  `gemini-3.5-flash-lite` it allowed 15 requests a minute in November 2026. One dictation is one
+  request, so you'll hit the minute limit only when you revise many short pieces in a row.
 - **Claude**: API keys and credit come from the Anthropic Console, separate from a Claude.ai
   subscription.
 - **OpenRouter**: one key for models from many companies. Model names include the company,
@@ -147,6 +149,8 @@ revision", followed by the reason. The common ones:
 - **No API key, or the key wasn't accepted**: paste the key again in Settings > AI revision.
 - **Out of credit or quota, or too many requests**: add credit on the provider's site, or wait a
   moment.
+- **Daily limit is used up** (Gemini's free tier): try again the next day, or turn on billing in
+  Google AI Studio.
 - **Doesn't have the chosen model**: pick another model from the list.
 - **Isn't offered in your country**: set a proxy in a country the provider serves.
 - **Took too long to answer**: raise the time limit, choose a faster model, or set Thinking to

@@ -36,7 +36,7 @@ pub(super) fn build(base: &str, key: Option<&str>, model: &str, effort: Effort, 
 
 pub(super) fn parse(status: u16, body: &str) -> Result<String, (ErrorKind, String)> {
     if !(200..300).contains(&status) {
-        return Err(from_answer(status, body));
+        return Err(quota_error(body).unwrap_or_else(|| from_answer(status, body)));
     }
     let v: Value = serde_json::from_str(body).map_err(|_| (ErrorKind::Unreadable, "not JSON".to_owned()))?;
     if let Some(r) = v["promptFeedback"]["blockReason"].as_str() {
@@ -60,6 +60,34 @@ pub(super) fn parse(status: u16, body: &str) -> Result<String, (ErrorKind, Strin
         return Err((ErrorKind::Unreadable, shorten(&why.unwrap_or_else(|| "the answer was empty".into()), 120)));
     }
     Ok(text)
+}
+
+/// Google's quota errors all start "You exceeded your current quota, please
+/// check your plan and billing details", even when the free tier's limit per
+/// minute was hit; the details say which limit it was.
+fn quota_error(body: &str) -> Option<(ErrorKind, String)> {
+    let v: Value = serde_json::from_str(body).ok()?;
+    let failure = v["error"]["details"]
+        .as_array()?
+        .iter()
+        .find(|d| d["@type"].as_str().is_some_and(|t| t.ends_with("QuotaFailure")))?;
+    let violation = &failure["violations"][0];
+    let id = violation["quotaId"].as_str()?;
+    let (kind, per) = if id.contains("PerMinute") || id.contains("PerSecond") {
+        (ErrorKind::RateLimited, if id.contains("PerSecond") { "a second" } else { "a minute" })
+    } else if id.contains("PerDay") {
+        (ErrorKind::DailyLimit, "a day")
+    } else {
+        return None;
+    };
+    let tier = if id.contains("FreeTier") { "the free tier" } else { "your plan" };
+    let what =
+        if violation["quotaMetric"].as_str().unwrap_or_default().contains("token") { "tokens" } else { "requests" };
+    let detail = match violation["quotaValue"].as_str() {
+        Some(n) => format!("{tier} allows {n} {what} {per}"),
+        None => format!("{tier}'s limit of {what} {per}"),
+    };
+    Some((kind, detail))
 }
 
 #[cfg(test)]
@@ -111,5 +139,50 @@ mod tests {
         let quota =
             r#"{"error":{"code":429,"message":"You exceeded your current quota","status":"RESOURCE_EXHAUSTED"}}"#;
         assert_eq!(parse(429, quota).unwrap_err().0, ErrorKind::Credit);
+    }
+
+    /// The shape of a real answer from November 2026 (message shortened).
+    fn quota_answer(id: &str, metric: &str) -> String {
+        json!({"error": {
+            "code": 429,
+            "message": "You exceeded your current quota, please check your plan and billing details.",
+            "status": "RESOURCE_EXHAUSTED",
+            "details": [
+                {"@type": "type.googleapis.com/google.rpc.Help", "links": []},
+                {"@type": "type.googleapis.com/google.rpc.QuotaFailure", "violations": [{
+                    "quotaMetric": metric,
+                    "quotaId": id,
+                    "quotaDimensions": {"model": "gemini-3.5-flash-lite", "location": "global"},
+                    "quotaValue": "15",
+                }]},
+                {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "21s"},
+            ],
+        }})
+        .to_string()
+    }
+
+    #[test]
+    fn free_tier_limits_are_not_billing_problems() {
+        let requests = "generativelanguage.googleapis.com/generate_content_free_tier_requests";
+        let minute = quota_answer("GenerateRequestsPerMinutePerProjectPerModel-FreeTier", requests);
+        assert_eq!(
+            parse(429, &minute).unwrap_err(),
+            (ErrorKind::RateLimited, "the free tier allows 15 requests a minute".into())
+        );
+        let day = quota_answer("GenerateRequestsPerDayPerProjectPerModel-FreeTier", requests);
+        assert_eq!(
+            parse(429, &day).unwrap_err(),
+            (ErrorKind::DailyLimit, "the free tier allows 15 requests a day".into())
+        );
+        let tokens = quota_answer(
+            "GenerateContentInputTokensPerModelPerMinute",
+            "generativelanguage.googleapis.com/generate_content_paid_tier_input_token_count",
+        );
+        assert_eq!(
+            parse(429, &tokens).unwrap_err(),
+            (ErrorKind::RateLimited, "your plan allows 15 tokens a minute".into())
+        );
+        let other = quota_answer("SomethingElse", requests);
+        assert_eq!(parse(429, &other).unwrap_err().0, ErrorKind::Credit);
     }
 }

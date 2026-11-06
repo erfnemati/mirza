@@ -20,16 +20,19 @@ async fn main() {
     let mut args = std::env::args().skip(1);
     let Some(kind) = args.next().as_deref().and_then(Kind::parse) else {
         return eprintln!(
-            "usage: revise <openai|gemini|claude|openrouter|local> [--base-url U] [--model M] [--style clean|light|full] [--presets a,b] [text]"
+            "usage: revise <openai|gemini|claude|openrouter|local> [--base-url U] [--model M] [--style clean|light|full] [--presets a,b] [--pause ms] [text]"
         );
     };
     let mut cfg = Config::load(&config::config_path()).unwrap_or_default();
     let mut settings = cfg.ai.get(kind).clone();
     let mut text = Vec::new();
+    let mut pause_ms: u64 = 50;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--base-url" => settings.base_url = args.next().unwrap_or_default(),
             "--model" => settings.model = args.next().unwrap_or_default(),
+            // Time between cases; a free tier (Gemini: 15 a minute) needs 4000 or more.
+            "--pause" => pause_ms = args.next().and_then(|v| v.parse().ok()).unwrap_or(pause_ms),
             "--style" => {
                 cfg.revision.style = match args.next().as_deref() {
                     Some("light") => Style::Light,
@@ -71,6 +74,6 @@ async fn main() {
             None => println!("out: {}\n     ({ms} ms)\n", r.text),
             Some(why) => println!("RAW: {why} ({ms} ms)\n"),
         }
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        tokio::time::sleep(Duration::from_millis(pause_ms)).await;
     }
 }
