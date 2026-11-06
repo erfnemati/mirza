@@ -613,7 +613,7 @@ mod tests {
     fn revision_settings_and_shortcuts() {
         let mut doc: toml_edit::DocumentMut = TEMPLATE.parse().unwrap();
         set_json(&mut doc, "revision.provider", &serde_json::json!("local")).unwrap();
-        set_json(&mut doc, "ai.local.base_url", &serde_json::json!("http://10.10.20.79:8000/v1")).unwrap();
+        set_json(&mut doc, "ai.local.base_url", &serde_json::json!("http://192.168.1.20:8000/v1")).unwrap();
         set_json(&mut doc, "ai.claude.effort", &serde_json::json!("low")).unwrap();
         set_shortcuts(
             &mut doc,
@@ -625,7 +625,7 @@ mod tests {
         let cfg = Config::parse(&doc.to_string()).unwrap();
         assert_eq!(cfg.revision.kind(), Some(crate::ai::Kind::Local));
         assert_eq!(cfg.revision.timeout_sec, 10);
-        assert_eq!(cfg.ai.local.base_url, "http://10.10.20.79:8000/v1");
+        assert_eq!(cfg.ai.local.base_url, "http://192.168.1.20:8000/v1");
         assert_eq!(cfg.ai.claude.effort, crate::ai::Effort::Low);
         assert_eq!(cfg.ai.claude.model, "claude-haiku-5-5");
         let ids: Vec<String> = cfg.shortcuts.iter().map(Shortcut::id).collect();
