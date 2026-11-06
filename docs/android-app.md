@@ -32,8 +32,8 @@ jobs, a central server, Play Store, iPhone.
   and Calendar calls, the task queue, config checks and the update check. `crates/mobile` wraps it
   for Kotlin through UniFFI, as in the trial.
 - **Every network call goes through the proxy setting** in the core (`net::connect_ws`,
-  `usage::http_client`), as on the desktop. The one exception is Google sign-in if it goes through
-  Google Play services (see "Decisions to ask"): that uses the phone's own network.
+  `usage::http_client`), as on the desktop. The one exception is Google sign-in, which goes through
+  Google Play services and so uses the phone's own network (see "Voice tasks on Android").
 - **The accessibility service is the center.** It draws the bubble (`TYPE_ACCESSIBILITY_OVERLAY`,
   which also shows on the lock screen, seen on the phone and the emulator), types, and sees
   whether the phone is locked. No "draw over other apps" permission and no permanent
@@ -106,10 +106,16 @@ assistant (long press on power) only if Erfan asks.
 Step 4 builds the task code in the core: the AI parser, the Google Tasks and Calendar calls, and
 the queue that keeps a transcript until the task is saved. Android adds:
 
-- **Google sign-in**, the way Erfan picks (decision 1). The core already accepts either a refresh
-  token (its own sign-in) or an access token handed over by Kotlin. With Play services the access
-  token lasts about an hour, so Kotlin fetches a fresh one (`authorize()`, silent once allowed)
-  before every core call, retries included.
+- **Google sign-in through Google Play services** (`AuthorizationClient`, Erfan's pick of
+  2026-11-06): one tap, no secret in the app, Google's way for Android. Sign-in and every token
+  refresh use the phone's own network, not Mirza's proxy, so the phone's VPN has to reach Google
+  at that moment; the Tasks and Calendar calls themselves still go through the proxy. Needs Play
+  services (global Xiaomi phones have it). Kotlin hands the core an access token, which lasts
+  about an hour, so it fetches a fresh one (`authorize()`, silent once allowed) before every core
+  call, retries included. Erfan creates the Google Cloud project (his name) with an Android OAuth
+  client for `dev.erfnemati.mirza` and the SHA-1 under "Signing key", published "In production" without
+  verification: up to 100 users and a warning screen once ("Testing" would end the sign-in every
+  7 days).
 - **The capture flow:** gesture, microphone service, Soniox, then the core's task call, then a
   notification "Added: <title> (<list>)" with Undo and Edit. Edit opens the task panel.
 - **One queue.** The lock-screen queue is the core's own queue with a "needs confirmation" flag:
@@ -160,20 +166,11 @@ created for `dev.erfnemati.mirza`):
 - SHA-1: `B2:81:EB:62:D0:7D:2C:89:2C:FD:7A:9B:68:76:AE:CA:74:9E:48:ED`
 - SHA-256: `FF:AC:89:7A:EA:E6:59:23:83:9D:79:B6:EE:F0:A1:DE:6D:FE:5E:8B:F6:A0:2A:D1:DA:2C:2C:61:D4:22:8C:42`
 
-## Decisions to ask Erfan (one at a time)
+## Decisions
 
-1. **Google sign-in.** (a) Google Play services sign-in (`AuthorizationClient`): Google's way for
-   Android, one tap, no secret in the app; but sign-in and every token refresh use the phone's own
-   network, not Mirza's proxy, so the phone's VPN must reach Google then. Needs Play services,
-   which global Xiaomi phones have. (b) Browser sign-in in a Custom Tab with Mirza keeping a
-   refresh token (as on the desktop): everything goes through Mirza's proxy, but Google turned
-   this off by default for new Android clients and asks apps to use (a); it has to be switched on
-   again in the client's advanced settings. Recommended: (a). Either way Erfan creates the Google
-   Cloud project and names it (step 4 already asks him for it), published "In production" without
-   verification: up to 100 users and a warning screen once ("Testing" would end the sign-in every
-   7 days).
-2. Smaller ones, when PR 3 starts: a full lock-screen queue refuses new tasks with a message?
-   Confirm queued tasks one by one or all at once?
+Answered by Erfan on 2026-11-06: no central server, the signing key as above, Google sign-in
+through Play services. Still to ask when PR 3 starts: does a full lock-screen queue refuse new
+tasks with a message? Confirm queued tasks one by one or all at once?
 
 ## Risks
 
