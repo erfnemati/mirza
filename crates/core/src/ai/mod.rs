@@ -237,7 +237,8 @@ impl Client {
         Ok(model)
     }
 
-    /// The models the provider offers, by ID, in its own order.
+    /// The models the provider offers, by ID, in its own order; for Gemini
+    /// only the ones that suit revision, newest first.
     pub async fn models(&self) -> Result<Vec<String>, AiError> {
         let key = self.api_key.clone().unwrap_or_default();
         let (url, headers): (String, Vec<(&str, String)>) = match self.kind {
@@ -258,16 +259,20 @@ impl Client {
         }
         let v: Value = serde_json::from_str(&body).unwrap_or_default();
         let ids = match self.kind {
-            Kind::Gemini => v["models"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter(|m| {
-                    m["supportedGenerationMethods"].as_array().is_none_or(|a| a.iter().any(|x| x == "generateContent"))
-                })
-                .filter_map(|m| m["name"].as_str())
-                .map(|n| n.trim_start_matches("models/").to_owned())
-                .collect(),
+            Kind::Gemini => gemini::pick_models(
+                v["models"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|m| {
+                        m["supportedGenerationMethods"]
+                            .as_array()
+                            .is_none_or(|a| a.iter().any(|x| x == "generateContent"))
+                    })
+                    .filter_map(|m| m["name"].as_str())
+                    .map(|n| n.trim_start_matches("models/").to_owned())
+                    .collect(),
+            ),
             _ => {
                 v["data"].as_array().into_iter().flatten().filter_map(|m| m["id"].as_str()).map(str::to_owned).collect()
             }

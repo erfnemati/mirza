@@ -62,6 +62,43 @@ pub(super) fn parse(status: u16, body: &str) -> Result<String, (ErrorKind, Strin
     Ok(text)
 }
 
+/// The models worth offering for revision, best first: the newest Flash, Pro
+/// and Flash-Lite, then the version before each. Google lists about fifty,
+/// most of them for speech, images, music or agents; any name can still be
+/// typed in the settings. A list with none of the usual names stays as it is.
+pub(super) fn pick_models(ids: Vec<String>) -> Vec<String> {
+    const TIERS: [&str; 3] = ["flash", "pro", "flash-lite"];
+    // (tier, version, preview, id), e.g. "gemini-3.1-pro-preview".
+    let mut found: Vec<(usize, Vec<u32>, bool, &String)> = ids
+        .iter()
+        .filter_map(|id| {
+            let rest = id.strip_prefix("gemini-")?;
+            let (rest, preview) = rest.strip_suffix("-preview").map_or((rest, false), |r| (r, true));
+            let (version, tier) = rest.split_once('-')?;
+            let tier = TIERS.iter().position(|t| *t == tier)?;
+            let version = version.split('.').map(|n| n.parse().ok()).collect::<Option<Vec<u32>>>()?;
+            Some((tier, version, preview, id))
+        })
+        .collect();
+    if found.is_empty() {
+        return ids;
+    }
+    // Newest first within each tier; a preview only when there's no release
+    // of the same version.
+    found.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)));
+    found.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
+    let mut taken = [0usize; TIERS.len()];
+    let mut picked = Vec::new();
+    for (tier, _, _, id) in found {
+        if taken[tier] < 2 {
+            picked.push((taken[tier], tier, id.clone()));
+            taken[tier] += 1;
+        }
+    }
+    picked.sort();
+    picked.into_iter().map(|(_, _, id)| id).collect()
+}
+
 /// Google's quota errors all start "You exceeded your current quota, please
 /// check your plan and billing details", even when the free tier's limit per
 /// minute was hit; the details say which limit it was.
@@ -139,6 +176,33 @@ mod tests {
         let quota =
             r#"{"error":{"code":429,"message":"You exceeded your current quota","status":"RESOURCE_EXHAUSTED"}}"#;
         assert_eq!(parse(429, quota).unwrap_err().0, ErrorKind::Credit);
+    }
+
+    #[test]
+    fn model_list_keeps_the_newest_text_models() {
+        // Google's list of generateContent models on 6 November 2026, shortened.
+        let listed = "gemini-2.5-flash gemini-2.5-pro gemini-2.5-flash-preview-tts gemma-4-31b-it \
+            gemini-flash-latest gemini-pro-latest gemini-2.5-flash-lite gemini-2.5-flash-image \
+            gemini-3-flash-preview gemini-3.1-pro-preview gemini-3.1-pro-preview-customtools \
+            gemini-3.1-flash-lite-preview gemini-3.1-flash-lite gemini-3-pro-image gemini-3.1-flash-image \
+            gemini-nano-banana-2.1 gemini-3.5-flash gemini-3.5-flash-lite gemini-omni-1.2-flash \
+            gemini-3.5-transcribe gemini-3.6-flash gemini-3.7-flash gemini-3.8-flash gemini-4-argon \
+            lyria-3.5 gemini-3.8-flash-tts gemini-3.8-flash-lite-tts gemini-robotics-er-2-preview \
+            gemini-2.5-computer-use-preview-10-2025 antigravity-preview-latest deep-research-preview-04-2026";
+        let ids = listed.split_whitespace().map(str::to_owned).collect();
+        assert_eq!(
+            pick_models(ids),
+            [
+                "gemini-3.8-flash",
+                "gemini-3.1-pro-preview",
+                "gemini-3.5-flash-lite",
+                "gemini-3.7-flash",
+                "gemini-2.5-pro",
+                "gemini-3.1-flash-lite",
+            ]
+        );
+        let gateway = vec!["my-model".to_owned()];
+        assert_eq!(pick_models(gateway.clone()), gateway);
     }
 
     /// The shape of a real answer from November 2026 (message shortened).

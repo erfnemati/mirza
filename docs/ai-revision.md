@@ -96,6 +96,9 @@ Notes per provider:
   improve its models. The free tier has a limit per minute and per day; for
   `gemini-3.5-flash-lite` it allowed 15 requests a minute in November 2026. One dictation is one
   request, so you'll hit the minute limit only when you revise many short pieces in a row.
+  Google lists about fifty models, most of them for speech, images or music, so the settings
+  page shows only the two newest Flash, Pro and Flash-Lite models, newest first; you can still
+  type any other name.
 - **Claude**: API keys and credit come from the Anthropic Console, separate from a Claude.ai
   subscription.
 - **OpenRouter**: one key for models from many companies. Model names include the company,
