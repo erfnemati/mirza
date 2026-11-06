@@ -77,6 +77,15 @@ impl Date {
 pub fn http_client(proxy: Option<&Url>, timeout: Duration) -> Result<reqwest::Client, String> {
     crate::net::init_tls();
     let mut b = reqwest::Client::builder().timeout(timeout).no_proxy();
+    // reqwest checks certificates with the system's verifier, which on Android needs the app's
+    // Java context handed to it first; the same roots as the WebSocket connections need nothing.
+    #[cfg(target_os = "android")]
+    {
+        let roots = rustls::RootCertStore { roots: webpki_roots::TLS_SERVER_ROOTS.to_vec() };
+        b = b.tls_backend_preconfigured(
+            rustls::ClientConfig::builder().with_root_certificates(roots).with_no_client_auth(),
+        );
+    }
     if let Some(p) = proxy {
         let url = p.as_str().replacen("socks5://", "socks5h://", 1);
         b = b.proxy(reqwest::Proxy::all(url).map_err(|e| e.to_string())?);
