@@ -6,9 +6,13 @@
 # and its microphone goes silent after a second. Snapshots are off: without KVM
 # a saved one fails to load ("Length mismatch" on a RAM block), and /home is small.
 # Its microphone is the default PulseAudio source: run scripts/dev/virtual-mic.sh start first.
+# The emulator still hears only silence until its host microphone is switched on (`mic`), and
+# it switches it off again by itself (seen after reinstalling the app): run `mic` before each test.
+# It refuses to start when /home is nearly full (it did with 1.6 GB free, not with 2.6 GB).
 #
 #   scripts/dev/emulator.sh start        boot in the background
 #   scripts/dev/emulator.sh wait         wait until Android has booted (up to 45 min)
+#   scripts/dev/emulator.sh mic          switch the host microphone on
 #   scripts/dev/emulator.sh screen F.png save a screenshot
 #   scripts/dev/emulator.sh stop         stop it
 #
@@ -52,6 +56,9 @@ wait)
   done
   echo "booted after $(($(date +%s) - start)) s"
   ;;
+mic)
+  "$ADB" -s "$DEV" emu avd hostmicon >/dev/null
+  ;;
 screen)
   "$ADB" -s "$DEV" exec-out screencap -p >"${2:?usage: emulator.sh screen <file.png>}"
   ;;
@@ -59,7 +66,7 @@ stop)
   "$ADB" -s "$DEV" emu kill
   ;;
 *)
-  echo "usage: $0 start | wait | screen <file.png> | stop" >&2
+  echo "usage: $0 start | wait | mic | screen <file.png> | stop" >&2
   exit 2
   ;;
 esac

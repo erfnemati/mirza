@@ -146,9 +146,27 @@ the queue that keeps a transcript until the task is saved. Android adds:
    restricted settings, Xiaomi).
 
 Each PR is tested on the KVM emulator with the virtual microphone (Persian clips through live
-Soniox), then on Erfan's phone with a short checklist; the PR says which is which. PR 1's phone
-checklist includes recording from the lock screen (a microphone service started from the lock
-screen on Android 14+ can only be checked on the emulator).
+Soniox), then on Erfan's phone with a short checklist; the PR says which is which. Recording from
+the lock screen comes with the queue in PR 3; until then a tap there only plays the error sound
+(Android hides toasts behind the lock screen).
+
+## Building and trying it
+
+From `android/`: `./gradlew :app:assembleDebug` gives `app/build/outputs/apk/debug/app-debug.apk`
+(add `-Pmirza.abis=x86_64` for the emulator only, which builds faster). Debug builds are signed
+with the release key when it is found, so they install over a release build and the other way
+around; they also carry `DebugReceiver`, adb hooks that only the shell can use:
+
+    adb shell am broadcast -n dev.erfnemati.mirza/.DebugReceiver -a mirza.TAP      # tap the bubble
+    ... -a mirza.SET --es path proxy --es json '"http://10.0.2.2:10808"'           # change a setting
+    ... -a mirza.UPDATE                                                             # check for updates
+
+On the emulator the proxy is `http://10.0.2.2:10808` (the server's proxy as the emulator sees it).
+A key can go in without showing up in any command line, fed through stdin:
+`adb exec-in "run-as dev.erfnemati.mirza sh -c 'mkdir -p files/mirza && cat > files/mirza/keys.toml'" < keys.toml`,
+then `adb shell "run-as dev.erfnemati.mirza chmod 700 files/mirza"` and `chmod 600` on the file
+the same way (`exec-in` ends the shell when the input ends, so nothing after `cat` runs there).
+Remove the key after the test.
 
 ## Signing key
 
