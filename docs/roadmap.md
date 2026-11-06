@@ -22,7 +22,8 @@ Agreed in November 2026. Each step is one or more PRs into `develop`.
    the task is saved, so nothing is lost offline. Dates resolve against when they were said;
    Jalali dates are converted in Rust.
 5. **Android app.** Kotlin app over the Rust core: floating bubble (size, logo, opacity), gestures
-   (tap, double tap, long press) mapped to actions, dictation, AI revision, voice tasks, and
-   Mirza's own alarm for tasks with a time (kept in the notes, rings only if still open).
+   (tap, double tap, long press) mapped to actions, dictation, AI revision and voice tasks. No
+   alarm of its own: a task with a time also becomes a Google Calendar event, whose reminder
+   rings. Plan: [android-app.md](android-app.md).
 6. **Microsoft To Do** (full reminders, categories and priority through Microsoft Graph).
 7. **iPhone**: a custom keyboard and a Shortcuts action over the same Rust core.
