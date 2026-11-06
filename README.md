@@ -48,6 +48,11 @@ the built-in voice typing of Windows and macOS.
 - **Services:** Soniox, OpenAI (GPT transcribe, Whisper) or ElevenLabs Scribe.
   Switch between them from the tray.
 - **Recognition help:** language hints, and custom words for names and jargon.
+- **AI revision (optional):** a separate shortcut sends the text through an AI
+  model (OpenAI, Gemini, Claude, OpenRouter or your own local server) that
+  drops fillers and repeats, keeps your last correction, and fixes punctuation
+  and half-spaces, without translating. If the AI fails, what you said is typed
+  as is. See [docs/ai-revision.md](docs/ai-revision.md).
 - **Tray and settings:** a tray icon that shows when it's recording, and a
   settings window with your usage and spend.
 - **Pauses** if you switch windows mid-sentence, so text never lands in the
@@ -109,6 +114,8 @@ Mirza to Applications. The first time you open it:
 
 - **When it listens:** audio is recorded only while you dictate.
 - **Where audio goes:** only to the speech service you picked.
+- **AI revision**, if you turn it on, sends the text (not the audio) to the AI
+  provider you picked, or to your own server.
 - **Your API keys** stay on your computer, readable only by you.
 - **Your text** is kept in memory for the "Recent text" list and never saved
   to disk.
