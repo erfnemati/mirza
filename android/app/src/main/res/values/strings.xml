@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Mirza</string>
+    <string name="typing_service_label">Mirza</string>
+    <string name="typing_service_description">Shows the Mirza bubble over other apps and types what you dictate into the text field you are in. Mirza reads the focused text field only to insert text at the cursor.</string>
 </resources>
