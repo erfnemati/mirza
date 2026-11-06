@@ -91,6 +91,21 @@ and a few friends. The price is a warning screen at sign-in (see below).
 Mirza needs both. For a desktop app the "secret" isn't really secret (Google says so itself:
 anyone can pull it out of the program), but there's no reason to post it.
 
+### 7. The phone's client (Mirza for Android)
+
+Mirza on Android signs in through Google Play services and needs a client of its own in the same
+project. It has no secret and no file to download. Create it once, even before the phone app is
+out:
+
+1. In [Clients](https://console.cloud.google.com/auth/clients), click **Create client**.
+2. **Application type**: **Android**. **Name**: `Mirza Android`.
+3. **Package name**: `dev.erfnemati.mirza`.
+4. **SHA-1 certificate fingerprint**: `B2:81:EB:62:D0:7D:2C:89:2C:FD:7A:9B:68:76:AE:CA:74:9E:48:ED`
+   (the key Mirza's Android releases are signed with; see
+   [android-app.md](android-app.md#signing-key)). Click **Create**.
+
+The phone uses the same scopes and the same publishing status as the desktop.
+
 ### Signing in
 
 1. Open Mirza's settings and go to **Voice tasks**. Open the downloaded JSON file in a text
