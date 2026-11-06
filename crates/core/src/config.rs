@@ -510,7 +510,7 @@ pub const TEMPLATE: &str = r#"# Mirza settings. Every key is optional; the value
 # is typed.
 # [revision]
 # provider = ""                   # openai, gemini, claude, openrouter or local
-# timeout_sec = 10                # longer dictations get a little more
+# timeout_sec = 15                # longer dictations get a little more
 # style = "clean"                 # clean, light (polish) or full (polish)
 # presets = []                    # plain_words, formal_persian, digits, no_dashes
 # instructions = ""               # your own rules, e.g. "Use British spelling."
@@ -626,7 +626,7 @@ mod tests {
         );
         let cfg = Config::parse(&doc.to_string()).unwrap();
         assert_eq!(cfg.revision.kind(), Some(crate::ai::Kind::Local));
-        assert_eq!(cfg.revision.timeout_sec, 10);
+        assert_eq!(cfg.revision.timeout_sec, 15);
         assert_eq!(cfg.ai.local.base_url, "http://192.168.1.20:8000/v1");
         assert_eq!(cfg.ai.claude.effort, crate::ai::Effort::Low);
         assert_eq!(cfg.ai.claude.model, "claude-haiku-5-5");

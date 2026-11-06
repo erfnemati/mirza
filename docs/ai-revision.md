@@ -30,8 +30,8 @@ much shorter, or in another language), Mirza types what you said, unrevised, and
 From a terminal, `mirza toggle-revise` does the same as the shortcut, which is handy for
 binding a key in your desktop's own keyboard settings.
 
-The text is typed once the revision is back, usually in under a second for a sentence and a
-few seconds for a long paragraph. Stay in the window until then. Where Mirza can see which
+The text is typed once the revision is back, usually a second or two for a sentence and a few
+seconds for a long paragraph. Stay in the window until then. Where Mirza can see which
 window is active (Windows, and KDE Plasma on Linux), switching to another window sends the text
 to the clipboard instead; elsewhere it is typed wherever you are.
 
@@ -130,7 +130,7 @@ server is on a public address or a domain like `ai.example.com`, it goes through
   It is off by default for OpenAI, Claude and OpenRouter, because it adds seconds and rarely
   helps with cleanup; Gemini and local servers use the model's own default. If a model rejects
   the setting, choose **The model's default**.
-- **Time limit**: how long to wait for the AI, 10 seconds by default. Longer dictations get a
+- **Time limit**: how long to wait for the AI, 15 seconds by default. Longer dictations get a
   second more for every 30 words over 100. When the time is up, the unrevised text is typed.
 - **Your own rules**: anything else you want, in plain words, for example "Use British
   spelling". These win over Mirza's rules and the switches.

@@ -202,7 +202,7 @@ impl Default for Revision {
     fn default() -> Self {
         Self {
             provider: String::new(),
-            timeout_sec: 10,
+            timeout_sec: 15,
             style: Style::Clean,
             presets: Vec::new(),
             instructions: String::new(),
