@@ -151,9 +151,18 @@ behave differently from a plain `EditText`.
   (`save_audio` in the prefs, set with adb), the file held about one second of sound and then only
   zeros, while the virtual microphone on the host carried the whole clip. Fed that saved file, the
   desktop got no text either, while the same clip with two thirds of it cut out (20 ms kept out of
-  every 60 ms) still gave 53 partial updates and final text. Live recognition still has to be
-  tested, on the phone or, now that the emulator's microphone works with KVM, on the emulator with
-  a Soniox key.
+  every 60 ms) still gave 53 partial updates and final text.
+- After the server got KVM, live recognition worked on the emulator. The same clip (Persian then
+  English, made with espeak-ng) was played into the emulator's microphone, and dictation was started
+  and stopped by tapping the accessibility bubble (mode B, keyboard up, Contacts "Company" field in
+  front). The field ended up with the whole sentence, 110 characters with both half-spaces and the
+  Persian letters intact: `سلام. من می‌خواهم این برنامه را امتحان کنم. کتاب‌ها روی میز هستند.
+  Hello, this is a test of Murner on Android.` ("Murner" is espeak's "Mirza"). That took 31 partial
+  updates and 4 typed pieces, with the first partial text 4.5 s after the tap.
+- In that run, the app's check right after each "set text" sometimes still read the field's old
+  text ("the field holds 5 chars after SET_TEXT, expected 43"), although the final text was
+  right. Moving the cursor after the text was refused in that field while the keyboard was up.
+  Step 5 should check the result after the field reports the change, not right after the call.
 - While the connection isn't up yet, `Dictation` queues 10 seconds of audio and then drops chunks.
   The phone app should keep the audio until the connection is up (or stop with a message) instead.
 
