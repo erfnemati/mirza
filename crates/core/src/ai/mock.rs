@@ -234,3 +234,20 @@ async fn public_hosts_go_through_the_proxy() {
     assert_eq!(c.complete(&text_request()).await.unwrap(), "Hello.");
     assert_eq!(m.seen()[0].target, "http://api.example.com/v1/chat/completions");
 }
+
+#[tokio::test]
+async fn model_lists() {
+    let gemini = r#"{"models":[{"name":"models/gemini-3.5-flash-lite","supportedGenerationMethods":["generateContent"]},{"name":"models/embedding-1","supportedGenerationMethods":["embedContent"]}]}"#;
+    let claude = r#"{"data":[{"id":"claude-haiku-5-5","type":"model"}],"has_more":false}"#;
+    let m = serve(vec![reply(200, gemini), reply(200, claude), reply(401, r#"{"error":{"message":"bad key"}}"#)]).await;
+    let g = client(Kind::Gemini, &m.base, Some("g"), "x");
+    assert_eq!(g.models().await.unwrap(), ["gemini-3.5-flash-lite"]);
+    let c = client(Kind::Claude, &m.base, Some("c"), "x");
+    assert_eq!(c.models().await.unwrap(), ["claude-haiku-5-5"]);
+    let o = client(Kind::OpenRouter, &m.base, Some("o"), "x");
+    assert_eq!(o.models().await.unwrap_err().kind, ErrorKind::KeyRejected);
+    let seen = m.seen();
+    assert_eq!(seen[0].target, "/v1beta/models?pageSize=200");
+    assert_eq!(seen[1].header("anthropic-version"), Some("2026-10-21"));
+    assert_eq!(seen[2].header("authorization"), Some("Bearer o"));
+}

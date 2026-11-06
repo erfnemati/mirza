@@ -229,22 +229,50 @@ impl Client {
         if let Some(m) = local_models().get(&self.base_url) {
             return Ok(m.clone());
         }
-        let mut rb = self.http.get(format!("{}/models", self.base_url));
-        if let Some(k) = &self.api_key {
-            rb = rb.bearer_auth(k);
-        }
-        let (status, body) = self.send(rb, &[]).await?;
+        let model =
+            self.models().await?.into_iter().next().ok_or_else(|| {
+                self.error(ErrorKind::NotSetUp, "the server lists no models; set one in the settings")
+            })?;
+        local_models().insert(self.base_url.clone(), model.clone());
+        Ok(model)
+    }
+
+    /// The models the provider offers, by ID, in its own order.
+    pub async fn models(&self) -> Result<Vec<String>, AiError> {
+        let key = self.api_key.clone().unwrap_or_default();
+        let (url, headers): (String, Vec<(&str, String)>) = match self.kind {
+            Kind::Claude => (
+                format!("{}/v1/models?limit=100", self.base_url),
+                vec![("x-api-key", key), ("anthropic-version", claude::VERSION.to_owned())],
+            ),
+            Kind::Gemini => (format!("{}/v1beta/models?pageSize=200", self.base_url), vec![("x-goog-api-key", key)]),
+            _ if self.api_key.is_some() => {
+                (format!("{}/models", self.base_url), vec![("authorization", format!("Bearer {key}"))])
+            }
+            _ => (format!("{}/models", self.base_url), Vec::new()),
+        };
+        let (status, body) = self.send(self.http.get(url), &headers).await?;
         if !(200..300).contains(&status) {
             let (kind, detail) = openai_chat::error_kind(self.kind, status, &body);
             return Err(self.error(kind, detail));
         }
         let v: Value = serde_json::from_str(&body).unwrap_or_default();
-        let model = v["data"][0]["id"]
-            .as_str()
-            .map(str::to_owned)
-            .ok_or_else(|| self.error(ErrorKind::NotSetUp, "the server lists no models; set one in the settings"))?;
-        local_models().insert(self.base_url.clone(), model.clone());
-        Ok(model)
+        let ids = match self.kind {
+            Kind::Gemini => v["models"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|m| {
+                    m["supportedGenerationMethods"].as_array().is_none_or(|a| a.iter().any(|x| x == "generateContent"))
+                })
+                .filter_map(|m| m["name"].as_str())
+                .map(|n| n.trim_start_matches("models/").to_owned())
+                .collect(),
+            _ => {
+                v["data"].as_array().into_iter().flatten().filter_map(|m| m["id"].as_str()).map(str::to_owned).collect()
+            }
+        };
+        Ok(ids)
     }
 }
 

@@ -12,9 +12,24 @@ const PROVIDERS = [
     keyUrl: "https://platform.openai.com/api-keys", usageUrl: "https://platform.openai.com/usage" },
 ];
 
+/** AI providers for revising dictation; the key of "local" is optional. */
+const AI_PROVIDERS = [
+  { id: "openai", name: "OpenAI", blurb: "GPT, fast and cheap", env: "OPENAI_API_KEY",
+    keyUrl: "https://platform.openai.com/api-keys", models: ["gpt-6-luna"] },
+  { id: "gemini", name: "Gemini", blurb: "Google's Flash-Lite", env: "GEMINI_API_KEY",
+    keyUrl: "https://aistudio.google.com/apikey", models: ["gemini-3.5-flash-lite", "gemini-3.8-flash"] },
+  { id: "claude", name: "Claude", blurb: "Anthropic's Haiku", env: "ANTHROPIC_API_KEY",
+    keyUrl: "https://console.anthropic.com/settings/keys", models: ["claude-haiku-5-5", "claude-sonnet-5-5"] },
+  { id: "openrouter", name: "OpenRouter", blurb: "Many models, one key", env: "OPENROUTER_API_KEY",
+    keyUrl: "https://openrouter.ai/settings/keys",
+    models: ["openai/gpt-6-luna", "google/gemini-3.5-flash-lite", "anthropic/claude-haiku-5.5"] },
+  { id: "local", name: "Local server", blurb: "vLLM, Ollama, LM Studio", env: "MIRZA_LOCAL_API_KEY", optionalKey: true, models: [] },
+];
+
 const SECTIONS = [
   { id: "provider", label: "Speech service", icon: "waves" },
   { id: "shortcuts", label: "Shortcuts", icon: "keyboard" },
+  { id: "revision", label: "AI revision", icon: "sparkles" },
   { id: "typing", label: "Typing", icon: "type" },
   { id: "listening", label: "Listening", icon: "mic" },
   { id: "usage", label: "Usage", icon: "chart" },
@@ -28,6 +43,10 @@ const SHORTCUTS = [
     desc: (c) => `Press once to start talking, press again to stop.${c.silence_stop_sec ? ` Mirza also stops after ${c.silence_stop_sec} seconds of silence.` : ""}` },
   { action: "dictate", mode: "hold", id: "dictate-hold", label: "Hold to talk",
     desc: () => "Hold the keys while you talk. The text is typed when you let go." },
+  { action: "revise", mode: "toggle", id: "revise-toggle", label: "Dictate and revise",
+    desc: (c) => `Like start / stop, but AI cleans up the text before it's typed.${c.revision.provider ? "" : " Choose an AI provider in AI revision first."}` },
+  { action: "revise", mode: "hold", id: "revise-hold", label: "Hold, then revise",
+    desc: () => "Like hold to talk, but AI cleans up the text before it's typed." },
   { action: "cancel", id: "cancel", label: "Cancel", desc: () => "Stop right away. Text that's already typed stays." },
   { action: "panel", id: "panel", label: "Open settings", desc: () => "Open this window." },
   { action: "next_provider", id: "next-provider", label: "Switch service", desc: () => "Switch to the next speech service." },
@@ -45,6 +64,9 @@ const state = {
   snap: null,
   section: "provider",
   models: {}, // provider -> {list, error, loading}
+  aiModels: {}, // AI provider -> {list, error, loading}
+  tryText: "",
+  tryResult: null, // {text, ms} or {error}
   languages: [],
   mics: [],
   editingKey: false,
@@ -97,6 +119,10 @@ function renderNav() {
     provider: !state.keys[provider().id]?.present,
     shortcuts: !state.cfg.shortcuts.some((s) => s.action === "dictate" && s.keys),
     typing: !!(state.snap && state.snap.typing_problem),
+    revision: (() => {
+      const a = AI_PROVIDERS.find((x) => x.id === state.cfg.revision.provider);
+      return !!a && !a.optionalKey && !state.keys[a.id]?.present;
+    })(),
   };
   nav.replaceChildren(
     ...SECTIONS.map((s) =>
@@ -159,6 +185,7 @@ function renderHeader() {
     connecting: ["busy", `Connecting to ${name}…`],
     listening: ["listening", `Listening · ${name}`],
     finishing: ["busy", "Finishing…"],
+    revising: ["busy", "Revising with AI…"],
   };
   const [cls, label] = map[s.state] || map.idle;
   dot.className = "dot " + cls;
@@ -192,7 +219,7 @@ function globalNotices() {
 function renderPage() {
   const content = document.getElementById("content");
   const page = h("div", { class: "page" });
-  const build = { provider: pageProvider, shortcuts: pageShortcuts, typing: pageTyping, listening: pageListening, usage: pageUsage, history: pageHistory, general: pageGeneral }[state.section];
+  const build = { provider: pageProvider, shortcuts: pageShortcuts, revision: pageRevision, typing: pageTyping, listening: pageListening, usage: pageUsage, history: pageHistory, general: pageGeneral }[state.section];
   page.append(...build().filter(Boolean));
   page.insertBefore(h("div", {}, ...globalNotices()), page.children[1] || null);
   content.replaceChildren(page);
@@ -225,56 +252,10 @@ function pageProvider() {
     ),
   );
 
-  // API key: hidden once saved, with a button to change it.
-  let keyControl;
-  if (key.present && !state.editingKey) {
-    keyControl = h(
-      "div",
-      {},
-      h(
-        "div",
-        { class: "input-row" },
-        h("div", { class: "input mono", attrs: { "aria-label": "Saved API key" }, style: "display:flex;align-items:center;color:var(--muted-foreground)" }, key.masked),
-        button("Edit", () => ((state.editingKey = true), renderPage()), { iconName: "pencil" }),
-        key.source === "file" ? button("", () => removeKey(p.id), { variant: "ghost", size: "icon", title: "Remove this key", iconName: "x" }) : null,
-      ),
-      key.source === "env" ? h("p", { class: "hint", textContent: `Set by the ${p.env} environment variable, which is used instead of a saved key.` }) : null,
-    );
-  } else {
-    const input = h("input", { class: "input mono", type: "password", placeholder: `Paste your ${p.name} API key`, spellcheck: false, attrs: { autocomplete: "off", "aria-label": "API key" } });
-    const reveal = button("", () => {
-      input.type = input.type === "password" ? "text" : "password";
-      reveal.replaceChildren(icon(input.type === "password" ? "eye" : "eyeOff"));
-    }, { variant: "ghost", size: "icon", title: "Show or hide", iconName: "eye" });
-    const saveKey = async () => {
-      const v = input.value.trim();
-      if (!v) return toast("Paste a key first", true);
-      await call("set_key", { provider: p.id, key: v });
-      state.editingKey = false;
-      await loadState();
-      toast("Key saved");
-      delete state.models[p.id];
-      renderNav();
-      renderPage();
-      call("send", { request: { cmd: "refresh_usage" } }).then(() => setTimeout(poll, 1500), () => {});
-    };
-    input.addEventListener("keydown", (e) => e.key === "Enter" && saveKey());
-    const link = h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => call("open_url", { url: p.keyUrl }), style: "padding:0;height:auto;color:var(--primary)" }, `Get a ${p.name} key`, icon("external"));
-    keyControl = h(
-      "div",
-      {},
-      h(
-        "div",
-        { class: "input-row" },
-        input,
-        reveal,
-        button("Save", saveKey, { variant: "primary" }),
-        key.present ? button("Cancel", () => ((state.editingKey = false), renderPage())) : null,
-      ),
-      h("p", { class: "hint" }, "Stored only on this computer. ", link),
-    );
-    setTimeout(() => state.editingKey && input.focus(), 0);
-  }
+  const keyControl = keyField(p, () => {
+    delete state.models[p.id];
+    call("send", { request: { cmd: "refresh_usage" } }).then(() => setTimeout(poll, 1500), () => {});
+  });
 
   // Model: pick from the provider's list, or type any name.
   const modelSuggestions = () =>
@@ -342,6 +323,59 @@ function pageProvider() {
   ];
 }
 
+/** The API key: hidden once saved, with a button to change it. */
+function keyField(p, onSaved, { optional = false } = {}) {
+  const key = state.keys[p.id] || {};
+  if (key.present && !state.editingKey) {
+    return h(
+      "div",
+      {},
+      h(
+        "div",
+        { class: "input-row" },
+        h("div", { class: "input mono", attrs: { "aria-label": "Saved API key" }, style: "display:flex;align-items:center;color:var(--muted-foreground)" }, key.masked),
+        button("Edit", () => ((state.editingKey = true), renderPage()), { iconName: "pencil" }),
+        key.source === "file" ? button("", () => removeKey(p.id), { variant: "ghost", size: "icon", title: "Remove this key", iconName: "x" }) : null,
+      ),
+      key.source === "env" ? h("p", { class: "hint", textContent: `Set by the ${p.env} environment variable, which is used instead of a saved key.` }) : null,
+    );
+  }
+  const input = h("input", { class: "input mono", type: "password", placeholder: optional ? "Only if your server asks for one" : `Paste your ${p.name} API key`, spellcheck: false, attrs: { autocomplete: "off", "aria-label": "API key" } });
+  const reveal = button("", () => {
+    input.type = input.type === "password" ? "text" : "password";
+    reveal.replaceChildren(icon(input.type === "password" ? "eye" : "eyeOff"));
+  }, { variant: "ghost", size: "icon", title: "Show or hide", iconName: "eye" });
+  const saveKey = async () => {
+    const v = input.value.trim();
+    if (!v) return toast("Paste a key first", true);
+    await call("set_key", { provider: p.id, key: v });
+    state.editingKey = false;
+    await loadState();
+    toast("Key saved");
+    onSaved();
+    renderNav();
+    renderPage();
+  };
+  input.addEventListener("keydown", (e) => e.key === "Enter" && saveKey());
+  const link = p.keyUrl
+    ? h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => call("open_url", { url: p.keyUrl }), style: "padding:0;height:auto;color:var(--primary)" }, `Get a ${p.name} key`, icon("external"))
+    : null;
+  if (!optional) setTimeout(() => state.editingKey && input.focus(), 0);
+  return h(
+    "div",
+    {},
+    h(
+      "div",
+      { class: "input-row" },
+      input,
+      reveal,
+      button("Save", saveKey, { variant: "primary" }),
+      key.present ? button("Cancel", () => ((state.editingKey = false), renderPage())) : null,
+    ),
+    h("p", { class: "hint" }, "Stored only on this computer. ", link),
+  );
+}
+
 async function setProvider(id) {
   if (state.snap) await call("send", { request: { cmd: "set_provider", id } });
   else await call("set_setting", { path: "active_provider", value: id });
@@ -357,6 +391,7 @@ async function removeKey(id) {
   await loadState();
   toast("Key removed");
   delete state.models[id];
+  delete state.aiModels[id];
   renderNav();
   renderPage();
 }
@@ -374,7 +409,8 @@ function pageShortcuts() {
   const list = state.cfg.shortcuts;
   const bound = new Map((state.snap && state.snap.shortcuts) || []);
   const desktopOwnsKeys = state.platform === "linux" && state.wayland;
-  const find = (s) => list.find((x) => x.action === s.action && (s.action !== "dictate" || (x.mode || "toggle") === s.mode));
+  const hasMode = (a) => a === "dictate" || a === "revise";
+  const find = (s) => list.find((x) => x.action === s.action && (!hasMode(s.action) || (x.mode || "toggle") === s.mode));
 
   const setKeys = (s, keys) => {
     const next = list.filter((x) => x !== find(s));
@@ -422,7 +458,8 @@ function pageShortcuts() {
   return [
     pageHead("Shortcuts", "Use these anywhere, even while this window is closed. Click a shortcut, then press the new keys."),
     !list.some((x) => x.action === "dictate" && x.keys) ? notice("Set a key for dictation: click “Set shortcut” and press the keys you want.") : null,
-    h("div", { class: "group" }, rows[0], h("div", {}, rows[1], holdSub), ...rows.slice(2)),
+    h("div", { class: "group" }, rows[0], h("div", {}, rows[1], holdSub), ...rows.slice(2, 4)),
+    h("div", { class: "group" }, ...rows.slice(4)),
     note,
   ];
 }
@@ -434,6 +471,176 @@ async function saveShortcuts(list) {
   renderNav();
   renderPage();
   setTimeout(poll, 800);
+}
+
+// ---- AI revision ------------------------------------------------------------------
+
+function pageRevision() {
+  const r = state.cfg.revision;
+  const a = AI_PROVIDERS.find((x) => x.id === r.provider);
+  const shortcutSet = state.cfg.shortcuts.some((x) => x.action === "revise" && x.keys);
+
+  const choices = h(
+    "div",
+    { class: "choices", attrs: { role: "radiogroup", "aria-label": "AI provider" } },
+    ...[{ id: "", name: "Off", blurb: "Type exactly what was heard" }, ...AI_PROVIDERS].map((it) =>
+      h(
+        "button",
+        {
+          class: "choice",
+          type: "button",
+          attrs: { role: "radio", "aria-checked": String(it.id === r.provider) },
+          onclick: async () => {
+            if (it.id === r.provider) return;
+            state.editingKey = false;
+            state.tryResult = null;
+            await save("revision.provider", it.id, { rerender: true });
+          },
+        },
+        h("strong", { textContent: it.name }),
+        h("span", { textContent: it.blurb }),
+      ),
+    ),
+  );
+
+  const out = [
+    pageHead("AI revision", "When you stop talking, an AI model cleans up the text before it's typed: it drops fillers and repeats, keeps only your last correction, and fixes punctuation and half-spaces. It never translates."),
+    a && !shortcutSet
+      ? notice("Set a “Dictate and revise” shortcut to use it. Your usual dictation shortcuts stay as they are.", {
+          actions: [button("Go to Shortcuts", () => go("shortcuts"), { size: "sm" })],
+        })
+      : null,
+    group(row({ label: "Provider", stack: true, control: choices })),
+  ];
+  if (!a) return out;
+
+  const c = state.cfg.ai[a.id];
+  const models = state.aiModels[a.id];
+  if (!models) loadAiModels(a.id);
+  const key = state.keys[a.id] || {};
+  const keyControl = keyField(a, () => delete state.aiModels[a.id], { optional: a.optionalKey });
+  const model = combobox({
+    value: c.model,
+    suggestions: () => {
+      const list = (models && models.list && models.list.length ? models.list : a.models).slice();
+      return list.map((m) => ({ value: m, label: m }));
+    },
+    placeholder: a.id === "local" ? "The server's first model" : "Model name",
+    label: "Model",
+    onCommit: (v) => save(`ai.${a.id}.model`, v, { rerender: true }),
+  });
+  const modelHint = h("p", { class: "hint" });
+  if (models && models.loading) modelHint.textContent = "Loading the list of models…";
+  else if (models && models.error) modelHint.textContent = `Couldn't load the list (${models.error}). You can still type a model name.`;
+  else if (a.id === "local") modelHint.textContent = "Leave empty to use the first model the server lists.";
+  else modelHint.textContent = "The default is fast and cheap, which is all cleaning up text needs.";
+
+  const address = h("input", { class: "input mono", value: c.base_url, placeholder: a.id === "local" ? "http://localhost:8000/v1" : "The provider's own address", spellcheck: false, attrs: { "aria-label": "Server address" } });
+  address.addEventListener("change", async () => {
+    delete state.aiModels[a.id];
+    await save(`ai.${a.id}.base_url`, address.value.trim(), { rerender: true });
+  });
+  const effort = select({
+    options: [
+      { value: "default", label: "The model's default" },
+      { value: "none", label: "None (fastest)" },
+      { value: "minimal", label: "Minimal" },
+      { value: "low", label: "Low" },
+      { value: "medium", label: "Medium" },
+      { value: "high", label: "High (slowest)" },
+    ],
+    value: c.effort,
+    label: "Thinking",
+    onChange: (v) => save(`ai.${a.id}.effort`, v),
+  });
+  const addressRow = row({
+    label: "Server address",
+    desc: a.id === "local"
+      ? "Where your server's OpenAI-compatible API is, ending in /v1. Servers on this computer or your network are reached directly, not through the proxy."
+      : "Leave empty unless you use a gateway in front of the provider.",
+    stack: true,
+    control: address,
+  });
+  const advanced = h(
+    "details",
+    { class: "group", open: a.id === "local" || !!c.base_url || undefined },
+    h("summary", { class: "row", style: "cursor:pointer", textContent: "More options" }),
+    a.id === "local" ? null : addressRow,
+    row({
+      label: "Thinking",
+      desc: "How much the model may think first. More is slower and rarely helps here.",
+      control: effort,
+    }),
+  );
+
+  const rules = h("textarea", { class: "input", rows: 3, placeholder: "For example: Write numbers as digits.", value: r.instructions, attrs: { dir: "auto", "aria-label": "Your own rules" } });
+  rules.addEventListener("change", () => save("revision.instructions", rules.value.trim()));
+
+  const tryBox = h("textarea", { class: "input", rows: 3, placeholder: "Type or paste something the way you'd say it, fillers and all.", value: state.tryText, attrs: { dir: "auto", "aria-label": "Text to try" } });
+  tryBox.addEventListener("input", () => (state.tryText = tryBox.value));
+  const result = h("div", {});
+  const showResult = () => {
+    const t = state.tryResult;
+    if (!t) return result.replaceChildren();
+    if (t.error) return result.replaceChildren(notice(t.error, { error: true }));
+    result.replaceChildren(
+      h("div", { class: "transcript" }, h("p", { textContent: t.text, attrs: { dir: "auto" } })),
+      h("p", { class: "hint", textContent: `Took ${(t.ms / 1000).toFixed(1)} s.` }),
+    );
+  };
+  showResult();
+  const tryIt = button("Revise", async () => {
+    const text = tryBox.value.trim();
+    if (!text) return toast("Type something first", true);
+    tryIt.disabled = true;
+    result.replaceChildren(h("p", { class: "hint", textContent: "Revising…" }));
+    try {
+      state.tryResult = await invoke("try_revision", { text });
+    } catch (e) {
+      state.tryResult = { error: String(e) };
+    }
+    tryIt.disabled = false;
+    showResult();
+  }, { variant: "primary", iconName: "sparkles" });
+
+  out.push(
+    !a.optionalKey && !key.present ? notice(`Add your ${a.name} API key to use AI revision.`) : null,
+    group(
+      row({ label: a.optionalKey ? "API key (optional)" : "API key", stack: true, control: keyControl }),
+      a.id === "local" ? addressRow : null,
+      row({ label: "Model", stack: true, control: h("div", {}, model, modelHint) }),
+    ),
+    advanced,
+    group(
+      row({
+        label: "Time limit",
+        desc: "If the AI hasn't answered by then, the original text is typed. Long dictations get a little more.",
+        control: h("div", { class: "row-control" }, numberInput(r.timeout_sec, (v) => save("revision.timeout_sec", v), { min: 1, max: 120, label: "Time limit in seconds" }), h("span", { class: "unit", textContent: "s" })),
+      }),
+      row({
+        label: "Your own rules",
+        desc: "Added to Mirza's rules, and they win over them.",
+        stack: true,
+        control: rules,
+      }),
+    ),
+    group(
+      row({
+        label: "Try it",
+        desc: a.id === "local" ? "Sent to your server, not stored by Mirza." : `Sent to ${a.name}, like your dictation will be.`,
+        stack: true,
+        control: h("div", { style: "display:grid;gap:8px" }, tryBox, h("div", {}, tryIt), result),
+      }),
+    ),
+  );
+  return out;
+}
+
+async function loadAiModels(id) {
+  state.aiModels[id] = { loading: true, list: [] };
+  const r = await invoke("list_ai_models", { provider: id }).catch((e) => ({ models: [], error: String(e) }));
+  state.aiModels[id] = { loading: false, list: r.models, error: r.error };
+  if (state.section === "revision" && state.cfg.revision.provider === id && !document.querySelector("#content .dropdown:focus-within, #content :focus")) renderPage();
 }
 
 // ---- Typing -------------------------------------------------------------------------
@@ -690,7 +897,8 @@ function balanceGroup(p, u) {
 // ---- Recent text ---------------------------------------------------------------------
 
 function pageHistory() {
-  const items = ((state.snap && state.snap.history) || []).slice().reverse();
+  const raw = (state.snap && state.snap.history_raw) || [];
+  const items = ((state.snap && state.snap.history) || []).map((text, i) => ({ text, raw: raw[i] || "" })).reverse();
   const clear = button("Clear", async () => {
     const r = await call("send", { request: { cmd: "clear_history" } });
     if (!r.ok) return toast(r.message, true);
@@ -704,17 +912,27 @@ function pageHistory() {
       ? h(
           "div",
           { class: "transcripts" },
-          ...items.map((t) =>
-            h(
-              "div",
-              { class: "transcript" },
-              h("p", { textContent: t, attrs: { dir: "auto" } }),
+          ...items.map((t) => {
+            const copy = (text, title) =>
               button("", async () => {
-                await navigator.clipboard.writeText(t);
+                await navigator.clipboard.writeText(text);
                 toast("Copied");
-              }, { variant: "ghost", size: "icon", iconName: "copy", title: "Copy" }),
-            ),
-          ),
+              }, { variant: "ghost", size: "icon", iconName: "copy", title });
+            const before = t.raw
+              ? h(
+                  "details",
+                  { class: "hint" },
+                  h("summary", { textContent: "Before AI revision" }),
+                  h("div", { class: "transcript" }, h("p", { textContent: t.raw, attrs: { dir: "auto" } }), copy(t.raw, "Copy the original")),
+                )
+              : null;
+            return h(
+              "div",
+              {},
+              h("div", { class: "transcript" }, h("p", { textContent: t.text, attrs: { dir: "auto" } }), copy(t.text, "Copy")),
+              before,
+            );
+          }),
         )
       : h("div", { class: "empty-state", textContent: "Nothing yet. What you dictate shows up here." }),
     h("div", { style: "height:16px" }),

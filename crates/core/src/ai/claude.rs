@@ -6,7 +6,7 @@ use super::error::{ErrorKind, from_answer};
 use super::{Effort, Format, Http, Request, budget, shorten};
 
 /// The API version these requests and answers follow.
-const VERSION: &str = "2026-10-21";
+pub(super) const VERSION: &str = "2026-10-21";
 
 pub(super) fn build(base: &str, key: Option<&str>, model: &str, effort: Effort, req: &Request) -> Http {
     let mut headers = vec![("anthropic-version", VERSION.to_owned())];
