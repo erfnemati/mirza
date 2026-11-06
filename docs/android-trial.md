@@ -86,7 +86,7 @@ change the conclusions.
 
 "Works" means Android let the app record; "silenced" means Android muted it (it hands the app
 zeros instead of failing); "refused" means `startForegroundService` threw. The emulator's own
-microphone input is unreliable (below), so all-zero audio alone proves nothing there. The recorder
+microphone input was unreliable during the trial (below), so all-zero audio alone proved nothing. The recorder
 therefore asks Android directly (`AudioRecord.getActiveRecordingConfiguration().isClientSilenced()`)
 and the log says "Android says it silenced this app" or "did not silence". The deciding cases were
 run again with that check; the first runs relied on whether any real sound arrived.
@@ -117,7 +117,9 @@ What this shows:
   even to the app itself in front, while the host side carries the clip and Android says the app
   is not silenced. That explains two odd silent runs in the first batch (A with the keyboard up,
   and one D run with accessibility on); the keyboard-up A case, run again with the check, was
-  silent with "Android says it did not silence this app".
+  silent with "Android says it did not silence this app". The cause was the software CPU
+  emulation: once the server had KVM, the same emulator heard a 12-second test tone without a
+  gap, twice (see "The emulator on this server").
 - The accessibility overlay (bubble 2) needs no "draw over other apps" permission and no permanent
   notification, and taps on it work like taps on the normal overlay.
 
@@ -149,8 +151,9 @@ behave differently from a plain `EditText`.
   (`save_audio` in the prefs, set with adb), the file held about one second of sound and then only
   zeros, while the virtual microphone on the host carried the whole clip. Fed that saved file, the
   desktop got no text either, while the same clip with two thirds of it cut out (20 ms kept out of
-  every 60 ms) still gave 53 partial updates and final text. Live recognition has to be tested on
-  the phone.
+  every 60 ms) still gave 53 partial updates and final text. Live recognition still has to be
+  tested, on the phone or, now that the emulator's microphone works with KVM, on the emulator with
+  a Soniox key.
 - While the connection isn't up yet, `Dictation` queues 10 seconds of audio and then drops chunks.
   The phone app should keep the audio until the connection is up (or stop with a message) instead.
 
@@ -190,15 +193,22 @@ installs are not restricted either, so tests that use `adb install` never show t
 
 ## The emulator on this server
 
-No KVM here, so the emulator runs on software CPU emulation, and that runs every virtual CPU on one
-host thread; more cores only add load, and the multi-threaded mode never finished booting. What
-made it usable: 2 cores and 3 GB, Google apps disabled, Bluetooth off (it crashed in a loop),
-animations off, a smaller screen (`wm size 540x1200`, `wm density 210`), and two system settings
-that stop `system_server` from restarting itself (`system_server_watchdog_timeout_ms 900000`, and
+Since 2026-11-06 the server's VM has nested virtualization on (in vSphere, "Expose hardware
+assisted virtualization to the guest OS" under the VM's CPU settings), so the emulator runs with
+KVM. A cold boot takes about 2 minutes, and its microphone hears the virtual microphone without
+gaps: a 12-second tone came through as 240 of 240 chunks with sound, in two runs.
+`scripts/dev/emulator.sh` uses KVM whenever `/dev/kvm` is there; the user `claude` is in the `kvm`
+group, and a shell that started before that runs the emulator through `sg kvm`.
+
+The trial ran before that, on software CPU emulation, which runs every virtual CPU on one host
+thread; more cores only add load, and the multi-threaded mode never finished booting. What made it
+usable: 2 cores and 3 GB, Google apps disabled, Bluetooth off (it crashed in a loop), animations
+off, a smaller screen (`wm size 540x1200`, `wm density 210`), and two system settings that stop
+`system_server` from restarting itself (`system_server_watchdog_timeout_ms 900000`, and
 `device_config put connectivity always_ratelimit_networkstack_crash true` with syncing disabled).
-A cold boot then takes about 7 minutes, and one test run about 2.5 minutes. Its microphone input
-is unreliable (a second of sound, then zeros), so it shows whether Android lets the app record, but
-not whether recognition works.
+A cold boot then took about 7 minutes, one test run about 2.5 minutes, and its microphone gave a
+second of sound and then zeros. Without KVM the script still falls back to 2 cores and 3 GB; the
+other settings were made by hand with adb.
 
 ## Phone checklist
 
