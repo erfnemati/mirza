@@ -49,7 +49,7 @@ the built-in voice typing of Windows and macOS.
   Switch between them from the tray.
 - **Recognition help:** language hints, and custom words for names and jargon.
 - **AI revision (optional):** a separate shortcut sends the text through an AI
-  model (OpenAI, Gemini, Claude, OpenRouter or your own local server) that
+  model (Claude, OpenAI, Gemini, OpenRouter or your own local server) that
   drops fillers and repeats, keeps your last correction, and fixes punctuation
   and half-spaces, without translating. If the AI fails, what you said is typed
   as is. See [docs/ai-revision.md](docs/ai-revision.md).

@@ -12,14 +12,14 @@ const PROVIDERS = [
     keyUrl: "https://platform.openai.com/api-keys", usageUrl: "https://platform.openai.com/usage" },
 ];
 
-/** AI providers for revising dictation; the key of "local" is optional. */
+/** AI providers for revising dictation, the recommended one first; the key of "local" is optional. */
 const AI_PROVIDERS = [
+  { id: "claude", name: "Claude", blurb: "Anthropic's Haiku", env: "ANTHROPIC_API_KEY", recommended: true,
+    keyUrl: "https://console.anthropic.com/settings/keys", models: ["claude-haiku-5-5", "claude-sonnet-5-5"] },
   { id: "openai", name: "OpenAI", blurb: "GPT, fast and cheap", env: "OPENAI_API_KEY",
     keyUrl: "https://platform.openai.com/api-keys", models: ["gpt-6-luna"] },
   { id: "gemini", name: "Gemini", blurb: "Google's Flash-Lite", env: "GEMINI_API_KEY",
     keyUrl: "https://aistudio.google.com/apikey", models: ["gemini-3.5-flash-lite", "gemini-3.8-flash"] },
-  { id: "claude", name: "Claude", blurb: "Anthropic's Haiku", env: "ANTHROPIC_API_KEY",
-    keyUrl: "https://console.anthropic.com/settings/keys", models: ["claude-haiku-5-5", "claude-sonnet-5-5"] },
   { id: "openrouter", name: "OpenRouter", blurb: "Many models, one key", env: "OPENROUTER_API_KEY",
     keyUrl: "https://openrouter.ai/settings/keys",
     models: ["openai/gpt-6-luna", "google/gemini-3.5-flash-lite", "anthropic/claude-haiku-5.5"] },
@@ -499,6 +499,7 @@ function pageRevision() {
         },
         h("strong", { textContent: it.name }),
         h("span", { textContent: it.blurb }),
+        it.recommended ? h("em", { class: "tag", textContent: "Recommended" }) : null,
       ),
     ),
   );

@@ -18,7 +18,8 @@ much shorter, or in another language), Mirza types what you said, unrevised, and
 ## Turning it on
 
 1. Open the settings and go to **AI revision**.
-2. Pick a provider and paste its key (see below). A local server needs no key.
+2. Pick a provider and paste its key (see below). We recommend Claude with its default model,
+   Haiku. A local server needs no key.
 3. Go to **Shortcuts** and set **Dictate and revise** (press once to start, again to stop) or
    **Hold, then revise**. There's no default key for these.
 4. Try it from the **Try it** box at the bottom of the AI revision page: type or paste a
@@ -45,9 +46,9 @@ Normal dictation, without the revise shortcut, doesn't use the AI at all.
 
 | Provider | Default model | Key | Environment variables |
 |---|---|---|---|
+| Claude (recommended) | `claude-haiku-5-5` | [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys) | `MIRZA_CLAUDE_API_KEY`, `ANTHROPIC_API_KEY` |
 | OpenAI | `gpt-6-luna` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) | `MIRZA_OPENAI_API_KEY`, `OPENAI_API_KEY` |
 | Gemini | `gemini-3.5-flash-lite` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | `MIRZA_GEMINI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY` |
-| Claude | `claude-haiku-5-5` | [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys) | `MIRZA_CLAUDE_API_KEY`, `ANTHROPIC_API_KEY` |
 | OpenRouter | `openai/gpt-6-luna` | [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys) | `MIRZA_OPENROUTER_API_KEY`, `OPENROUTER_API_KEY` |
 | Local server | the first one the server lists | none, or your server's own | `MIRZA_LOCAL_API_KEY` |
 
@@ -66,7 +67,7 @@ Notes per provider:
 - **Claude**: API keys and credit come from the Anthropic Console, separate from a Claude.ai
   subscription.
 - **OpenRouter**: one key for models from many companies. Model names include the company,
-  like `openai/gpt-6-luna` or `anthropic/claude-haiku-5-5`. Mirza shows up as the app on your
+  like `openai/gpt-6-luna` or `anthropic/claude-haiku-5.5`. Mirza shows up as the app on your
   OpenRouter activity page.
 - **Local server**: anything that speaks OpenAI's Chat Completions API: vLLM, llama.cpp
   (`llama-server`), Ollama, LM Studio. Set the address ending in `/v1`, for example
