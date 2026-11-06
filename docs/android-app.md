@@ -48,8 +48,8 @@ jobs, a central server, Play Store, iPhone.
   Compose builds with AGP 9's built-in Kotlin (compose compiler plugin matching that Kotlin,
   `buildFeatures.compose`).
 - **One app id and one signing key from the start.** `dev.erfnemati.mirza`, every build signed with
-  the same release key (decision 2 below), so updates install over each other and Google sign-in
-  sees one certificate. The trial (`dev.erfnemati.mirza.trial`) stays until the real app covers its
+  the same release key (see "Signing key" below), so updates install over each other and Google
+  sign-in sees one certificate. The trial (`dev.erfnemati.mirza.trial`) stays until the real app covers its
   checklist; the setup screen tells you to turn the trial's typing service off, since two typing
   services would both draw bubbles.
 
@@ -144,6 +144,22 @@ Soniox), then on Erfan's phone with a short checklist; the PR says which is whic
 checklist includes recording from the lock screen (a microphone service started from the lock
 screen on Android 14+ can only be checked on the emulator).
 
+## Signing key
+
+Made on the development server on 2026-11-06 (Erfan's OK): RSA 4096, PKCS12, alias `mirza`, owner
+`CN=Mirza, O=Erfan Nemati`, valid until 2054. It lives in `.secrets/` at the root of the main
+clone (`~/projects/mirza/.secrets/android-release.p12` and `android-release.password`, mode 600),
+ignored by git and listed in `.backup-paths`, so Erfan's laptop keeps a copy. The Release workflow
+gets it from the GitHub secrets `MIRZA_ANDROID_KEYSTORE` (the file in base64) and
+`MIRZA_ANDROID_KEYSTORE_PASSWORD`; GitHub can't show them again, so the laptop copy is the backup.
+If the key is lost, every user has to uninstall Mirza and install it again.
+
+Certificate fingerprints (public; Google Cloud asks for the SHA-1 when the Android OAuth client is
+created for `dev.erfnemati.mirza`):
+
+- SHA-1: `B2:81:EB:62:D0:7D:2C:89:2C:FD:7A:9B:68:76:AE:CA:74:9E:48:ED`
+- SHA-256: `FF:AC:89:7A:EA:E6:59:23:83:9D:79:B6:EE:F0:A1:DE:6D:FE:5E:8B:F6:A0:2A:D1:DA:2C:2C:61:D4:22:8C:42`
+
 ## Decisions to ask Erfan (one at a time)
 
 1. **Google sign-in.** (a) Google Play services sign-in (`AuthorizationClient`): Google's way for
@@ -156,11 +172,7 @@ screen on Android 14+ can only be checked on the emulator).
    Cloud project and names it (step 4 already asks him for it), published "In production" without
    verification: up to 100 users and a warning screen once ("Testing" would end the sign-in every
    7 days).
-2. **The signing key**, needed before PR 1's first build for the phone. Recommended: one release
-   key made on this server, kept out of git, listed in `.backup-paths` so his laptop copies it, and
-   added as a GitHub secret for the Release workflow. If it is lost, everyone has to uninstall and
-   install again, with the Play Protect and restricted-settings steps.
-3. Smaller ones, when PR 3 starts: a full lock-screen queue refuses new tasks with a message?
+2. Smaller ones, when PR 3 starts: a full lock-screen queue refuses new tasks with a message?
    Confirm queued tasks one by one or all at once?
 
 ## Risks
