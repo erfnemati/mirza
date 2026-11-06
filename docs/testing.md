@@ -36,6 +36,29 @@ keyboard layout").
       pauses, and the rest ends up in the clipboard.
 - [ ] **Silence.** Stay silent for a minute. Mirza stops by itself.
 
+## AI revision
+
+Needs a key for one AI provider (see [ai-revision.md](ai-revision.md)), or a
+local server.
+
+- [ ] **Setup.** In Settings > AI revision, pick the provider and paste the
+      key. **Try it** with *«خب من فردا نه ببخشید پس فردا می خوام برم
+      دانشگاه»*: you get «من پس‌فردا می‌خوام برم دانشگاه.» or close to it.
+- [ ] **Shortcut.** Set **Dictate and revise**. Say a sentence with an "um"
+      and a self-correction. The cleaned text is typed; Recent text shows
+      both versions.
+- [ ] **Mixed languages.** Say *«این PR رو review کن و بعد merge کن»*. The
+      English words stay English and nothing is translated.
+- [ ] **Polish.** Choose **Full polish** and turn on **Plain words** and
+      **Numbers as digits**. Say a long, rambling sentence with a price in it
+      («قیمتش صد و پنجاه هزار تومنه»). It comes back shorter and tidier, with
+      every point kept and the price as «۱۵۰ هزار».
+- [ ] **Failure.** Paste a wrong key for the AI provider, then dictate and
+      revise. What you said is typed unrevised, with a notification saying
+      why.
+- [ ] **Second press.** While it says "Revising with AI…", press the shortcut
+      again. The unrevised text is typed right away.
+
 ## Other checks
 
 - [ ] **Usage.** The tray menu shows this month's Soniox spend.

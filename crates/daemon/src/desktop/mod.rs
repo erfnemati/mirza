@@ -57,6 +57,7 @@ impl TrayView {
             State::Connecting => format!("Connecting to {name}…"),
             State::Listening => format!("Listening · {name}"),
             State::Finishing => "Finishing…".into(),
+            State::Revising => "Revising with AI…".into(),
         }
     }
 
@@ -67,7 +68,7 @@ impl TrayView {
             State::Idle if !self.error.is_empty() => "error",
             State::Idle => "idle",
             State::Connecting | State::Listening => REC[(self.frame as usize).min(5)],
-            State::Finishing => "busy",
+            State::Finishing | State::Revising => "busy",
         }
     }
 }

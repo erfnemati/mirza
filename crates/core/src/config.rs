@@ -44,6 +44,10 @@ pub struct Config {
     pub history_size: usize,
     pub typing: Typing,
     pub providers: Providers,
+    /// Revising dictation with AI; off until a provider is chosen.
+    pub revision: crate::ai::Revision,
+    /// AI providers: model, address and thinking effort for each.
+    pub ai: crate::ai::AiProviders,
     /// Prepaid credit per provider, so the app can show what is left: amount
     /// minus spend since the date.
     pub credit: BTreeMap<String, Credit>,
@@ -68,6 +72,8 @@ impl Default for Config {
             history_size: 20,
             typing: Typing::default(),
             providers: Providers::default(),
+            revision: crate::ai::Revision::default(),
+            ai: crate::ai::AiProviders::default(),
             credit: BTreeMap::new(),
         }
     }
@@ -77,6 +83,8 @@ impl Default for Config {
 #[serde(rename_all = "snake_case")]
 pub enum Action {
     Dictate,
+    /// Dictate, then have AI clean up the text before it is typed.
+    Revise,
     Cancel,
     Panel,
     NextProvider,
@@ -108,6 +116,7 @@ impl Shortcut {
     pub fn id(&self) -> String {
         match self.action {
             Action::Dictate => format!("dictate-{}", if self.mode == Mode::Hold { "hold" } else { "toggle" }),
+            Action::Revise => format!("revise-{}", if self.mode == Mode::Hold { "hold" } else { "toggle" }),
             Action::Cancel => "cancel".into(),
             Action::Panel => "panel".into(),
             Action::NextProvider => "next-provider".into(),
@@ -118,6 +127,8 @@ impl Shortcut {
         match (self.action, self.mode) {
             (Action::Dictate, Mode::Toggle) => "Start or stop dictation",
             (Action::Dictate, Mode::Hold) => "Dictate while held",
+            (Action::Revise, Mode::Toggle) => "Start or stop dictation, revised with AI",
+            (Action::Revise, Mode::Hold) => "Dictate while held, revised with AI",
             (Action::Cancel, _) => "Cancel dictation",
             (Action::Panel, _) => "Open Mirza settings",
             (Action::NextProvider, _) => "Switch to the next speech-to-text provider",
@@ -424,7 +435,7 @@ pub fn set_shortcuts(doc: &mut toml_edit::DocumentMut, list: &[Shortcut]) {
             serde_json::to_value(sc.action).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default();
         t["action"] = toml_edit::value(action);
         t["keys"] = toml_edit::value(sc.keys.as_str());
-        if sc.action == Action::Dictate {
+        if matches!(sc.action, Action::Dictate | Action::Revise) {
             t["mode"] = toml_edit::value(if sc.mode == Mode::Hold { "hold" } else { "toggle" });
         }
         arr.push(t);
@@ -458,7 +469,7 @@ pub const TEMPLATE: &str = r#"# Mirza settings. Every key is optional; the value
 # Global shortcuts; `mode` is "toggle" or "hold". Without this section the
 # defaults are Ctrl+Alt+H (start/stop) and Ctrl+Alt+J (hold to talk).
 # [[shortcuts]]
-# action = "dictate"              # dictate, cancel, panel or next_provider
+# action = "dictate"              # dictate, revise, cancel, panel or next_provider
 # keys = "Ctrl+Alt+H"
 # mode = "toggle"
 #
@@ -493,6 +504,35 @@ pub const TEMPLATE: &str = r#"# Mirza settings. Every key is optional; the value
 # strict_languages = false
 # terms = []                      # names and words to expect
 # price_per_min = 0.002
+
+# Revise dictation with AI before it is typed (the "revise" shortcut). Off
+# until a provider is chosen. If the AI fails or is slow, the original text
+# is typed.
+# [revision]
+# provider = ""                   # openai, gemini, claude, openrouter or local
+# timeout_sec = 15                # longer dictations get a little more
+# style = "clean"                 # clean, light (polish) or full (polish)
+# presets = []                    # plain_words, formal_persian, digits, no_dashes
+# instructions = ""               # your own rules, e.g. "Use British spelling."
+
+# Each AI provider's model; base_url "" means the provider's own address.
+# effort: default (the model's own), none, minimal, low, medium or high: how much
+# it may think first. Some models refuse none or minimal.
+# [ai.openai]
+# model = "gpt-6-luna"
+#
+# [ai.gemini]
+# model = "gemini-3.5-flash-lite"
+#
+# [ai.claude]
+# model = "claude-haiku-5-5"
+#
+# [ai.openrouter]
+# model = "openai/gpt-6-luna"
+#
+# [ai.local]                      # an OpenAI-compatible server (vLLM, Ollama, LM Studio)
+# base_url = "http://localhost:8000/v1"
+# model = ""                      # empty: the first model the server lists
 
 # [credit.soniox]                 # prepaid credit, to show what is left
 # amount = 20.0
@@ -567,6 +607,30 @@ mod tests {
         assert!(cfg.shortcuts.is_empty(), "no defaults after the user removed them all");
         assert_eq!(cfg.providers.soniox.languages, ["fa"], "the list didn't land inside a table");
         assert_eq!(Config::default().shortcuts.len(), 2);
+    }
+
+    #[test]
+    fn revision_settings_and_shortcuts() {
+        let mut doc: toml_edit::DocumentMut = TEMPLATE.parse().unwrap();
+        set_json(&mut doc, "revision.provider", &serde_json::json!("local")).unwrap();
+        set_json(&mut doc, "ai.local.base_url", &serde_json::json!("http://192.168.1.20:8000/v1")).unwrap();
+        set_json(&mut doc, "ai.claude.effort", &serde_json::json!("low")).unwrap();
+        set_shortcuts(
+            &mut doc,
+            &[
+                Shortcut { action: Action::Revise, keys: "Ctrl+Alt+R".into(), mode: Mode::Toggle },
+                Shortcut { action: Action::Revise, keys: "Ctrl+Alt+K".into(), mode: Mode::Hold },
+            ],
+        );
+        let cfg = Config::parse(&doc.to_string()).unwrap();
+        assert_eq!(cfg.revision.kind(), Some(crate::ai::Kind::Local));
+        assert_eq!(cfg.revision.timeout_sec, 15);
+        assert_eq!(cfg.ai.local.base_url, "http://192.168.1.20:8000/v1");
+        assert_eq!(cfg.ai.claude.effort, crate::ai::Effort::Low);
+        assert_eq!(cfg.ai.claude.model, "claude-haiku-5-5");
+        let ids: Vec<String> = cfg.shortcuts.iter().map(Shortcut::id).collect();
+        assert_eq!(ids, ["revise-toggle", "revise-hold"]);
+        assert_eq!(Config::default().revision.kind(), None, "off by default");
     }
 
     #[test]
