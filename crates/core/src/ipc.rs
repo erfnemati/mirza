@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Request {
     Toggle,
+    /// Like Toggle, but the text is revised with AI before it is typed.
+    ToggleRevise,
     Start,
     Stop,
     Cancel,
@@ -67,6 +69,8 @@ pub enum State {
     Connecting,
     Listening,
     Finishing,
+    /// Waiting for the AI to revise the text.
+    Revising,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -84,6 +88,10 @@ pub struct Snapshot {
     pub status: Status,
     /// Recent transcripts, newest last.
     pub history: Vec<String>,
+    /// For each entry of `history`: what the speech provider heard, when AI
+    /// revised it; "" otherwise.
+    #[serde(default)]
+    pub history_raw: Vec<String>,
     pub usage: Option<UsageInfo>,
     /// Whether usage is being fetched right now.
     #[serde(default)]

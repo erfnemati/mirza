@@ -6,6 +6,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime};
 
+use mirza_core::ai::revise::{self, Hints, Revised};
 use mirza_core::audio::Recorder;
 use mirza_core::audio::sound::{self, Sound};
 use mirza_core::config::{self, Action as ShortcutAction, Config, Mode, provider_name};
@@ -49,6 +50,8 @@ pub enum Msg {
     StopTail(u64),
     ReleaseTyping(u64),
     Done(Done),
+    /// The AI's revision of a session's text (or the original, if it failed).
+    Revised(u64, Revised),
     #[cfg_attr(target_os = "macos", allow(dead_code))] // no focus tracking on macOS yet
     FocusChanged,
     RefreshUsage,
@@ -64,6 +67,25 @@ pub struct Done {
     error: Option<String>,
     reason: Reason,
     note: u32,
+    /// A revise session: what the speech provider heard, kept for Recent
+    /// text even when nothing was typed.
+    raw: Option<String>,
+    /// Why the text was typed without AI revision.
+    unrevised: Option<String>,
+}
+
+/// The AI part of a "dictate and revise" session.
+struct Revision {
+    client: mirza_core::ai::Client,
+    hints: Hints,
+    timeout: u64,
+    /// The final transcript so far; nothing is typed until the AI is done.
+    transcript: String,
+    /// While the AI works: when it started, and its task.
+    running: Option<(Instant, JoinHandle<()>)>,
+    /// Whether text has been handed to typing.
+    typed: bool,
+    unrevised: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,6 +116,16 @@ struct Session {
     /// Whether the start and stop sounds have played.
     started_sound: bool,
     stopped_sound: bool,
+    /// The provider sent its last words; later events are ignored.
+    finished: bool,
+    revision: Option<Revision>,
+}
+
+/// One entry of Recent text.
+struct HistoryItem {
+    text: String,
+    /// What the speech provider heard, when AI revised it.
+    raw: String,
 }
 
 pub struct Daemon {
@@ -106,7 +138,7 @@ pub struct Daemon {
     session: Option<Session>,
     next_id: u64,
     status: Status,
-    history: VecDeque<String>,
+    history: VecDeque<HistoryItem>,
     usage: Option<(String, Usage)>,
     /// When usage was last asked for.
     usage_at: Option<Instant>,
@@ -222,6 +254,7 @@ impl Daemon {
                 }
             }
             Msg::Done(d) => self.done(d).await,
+            Msg::Revised(id, r) => self.revised(id, r).await,
             Msg::FocusChanged => {
                 if let Some(t) = self.session.as_ref().and_then(|s| s.typing.as_ref()) {
                     t.focus_changed();
@@ -255,9 +288,10 @@ impl Daemon {
     async fn request(&mut self, req: Request) -> Reply {
         let result = match req {
             Request::Toggle => self.toggle().await,
+            Request::ToggleRevise => self.toggle_kind(true).await,
             Request::Start => {
                 if self.session.is_none() {
-                    self.start(None).await
+                    self.start(None, false).await
                 } else {
                     Ok(())
                 }
@@ -308,18 +342,36 @@ impl Daemon {
     }
 
     async fn toggle(&mut self) -> Result<(), String> {
+        self.toggle_kind(false).await
+    }
+
+    /// Starts a session, revised with AI if `revise`, or acts on the one
+    /// running.
+    async fn toggle_kind(&mut self, revise: bool) -> Result<(), String> {
         if self.session.is_some() {
-            self.stop(Reason::User);
+            self.press_during_session().await;
             Ok(())
         } else {
-            self.start(None).await
+            self.start(None, revise).await
+        }
+    }
+
+    /// A dictation shortcut pressed during a session: stop recording, or,
+    /// while the AI is revising, stop waiting and type the original text.
+    async fn press_during_session(&mut self) {
+        let revising = self.session.as_ref().and_then(|s| s.revision.as_ref()).is_some_and(|r| r.running.is_some());
+        if revising {
+            tracing::info!("revision skipped: typing the original text");
+            self.end(None, None).await;
+        } else {
+            self.stop(Reason::User);
         }
     }
 
     /// Starts a session. For hold-to-talk, the connection waits until the key
     /// has been held for the minimum time, so a tap costs nothing.
-    async fn start(&mut self, hold: Option<String>) -> Result<(), String> {
-        let result = self.try_start(hold).await;
+    async fn start(&mut self, hold: Option<String>, revise: bool) -> Result<(), String> {
+        let result = self.try_start(hold, revise).await;
         if let Err(e) = &result {
             self.play(Sound::Error);
             self.status.last_error = e.clone();
@@ -329,7 +381,7 @@ impl Daemon {
         result
     }
 
-    async fn try_start(&mut self, hold: Option<String>) -> Result<(), String> {
+    async fn try_start(&mut self, hold: Option<String>, revise: bool) -> Result<(), String> {
         if self.session.is_some() {
             return Err("already dictating".into());
         }
@@ -340,6 +392,35 @@ impl Daemon {
         let (api_key, _) = secrets::get(&provider)
             .ok_or_else(|| format!("No API key for {name}. Run `mirza set-key {provider}` or add it in Settings."))?;
         let proxy = net::resolve_proxy(&cfg.proxy).map_err(|e| e.to_string())?;
+        let revision = if revise {
+            // Checked now, so a missing key doesn't cost a whole dictation.
+            let kind = match cfg.revision.provider.trim() {
+                "" => return Err("AI revision is off. Choose an AI provider in Settings > AI revision.".into()),
+                p => mirza_core::ai::Kind::parse(p)
+                    .ok_or_else(|| format!("Unknown AI provider {p:?} in the settings."))?,
+            };
+            let key = secrets::get(kind.id()).map(|(k, _)| k);
+            // The time limit is applied per dictation, by its length.
+            let client =
+                mirza_core::ai::Client::new(kind, cfg.ai.get(kind), key, proxy.as_ref(), Duration::from_secs(600))
+                    .map_err(|e| e.to_string())?;
+            let hints = Hints {
+                languages: settings.languages.clone(),
+                terms: settings.terms.clone(),
+                instructions: cfg.revision.instructions.clone(),
+            };
+            Some(Revision {
+                client,
+                hints,
+                timeout: cfg.revision.timeout_sec,
+                transcript: String::new(),
+                running: None,
+                typed: false,
+                unrevised: None,
+            })
+        } else {
+            None
+        };
         let injector = self.desktop.injector()?;
 
         let rate = providers::sample_rate(&provider);
@@ -384,6 +465,8 @@ impl Daemon {
             paused_noted: false,
             started_sound: false,
             stopped_sound: false,
+            finished: false,
+            revision,
         });
         if is_hold {
             let tx = self.tx.clone();
@@ -399,7 +482,12 @@ impl Daemon {
         self.status.state = State::Listening;
         self.status.last_error.clear();
         if self.cfg.notifications {
-            let note = self.desktop.notify("Listening…", &name, false, 0).await;
+            let ai = self.session.as_ref().and_then(|s| s.revision.as_ref()).map(|r| r.client.kind().name());
+            let body = match ai {
+                Some(ai) => format!("{name}, then revised by {ai}"),
+                None => name,
+            };
+            let note = self.desktop.notify("Listening…", &body, false, 0).await;
             if let Some(s) = self.session.as_mut() {
                 s.note = note;
             }
@@ -459,6 +547,21 @@ impl Daemon {
             h.abort();
         }
         drop(s.recorder.take());
+        let cancelled = matches!(reason, Some(Reason::Cancelled | Reason::TooShort));
+        if let Some(r) = s.revision.as_mut() {
+            if let Some((_, task)) = r.running.take() {
+                task.abort();
+            }
+            // Not revised (an error, or the user didn't want to wait): type
+            // what was heard, so nothing is lost. Cancelling types nothing;
+            // the text stays in Recent text.
+            if !r.typed && !cancelled && !r.transcript.trim().is_empty() {
+                if let Some(t) = &s.typing {
+                    t.push(r.transcript.trim().to_owned());
+                }
+                r.typed = true;
+            }
+        }
         if error.is_some() {
             self.play(Sound::Error);
         } else if s.started_sound && !s.stopped_sound {
@@ -466,12 +569,14 @@ impl Daemon {
         }
         let reason = reason.unwrap_or(s.reason);
         let (id, note) = (s.id, s.note);
+        let raw = s.revision.as_ref().map(|r| r.transcript.trim().to_owned());
+        let unrevised = s.revision.as_mut().and_then(|r| r.unrevised.take());
         let typing = s.typing.take();
         let tx = self.tx.clone();
         self.status.state = State::Finishing;
         tokio::task::spawn_blocking(move || {
             let outcome = typing.map(TypingSession::finish).unwrap_or_default();
-            let _ = tx.send(Msg::Done(Done { id, outcome, error, reason, note }));
+            let _ = tx.send(Msg::Done(Done { id, outcome, error, reason, note, raw, unrevised }));
         });
         self.update_tray().await;
     }
@@ -486,10 +591,14 @@ impl Daemon {
         );
         self.status.state = if self.session.is_some() { State::Listening } else { State::Idle };
         let text = d.outcome.text.trim().to_owned();
-        if !text.is_empty() {
-            self.status.last_text = text.clone();
+        let raw = d.raw.clone().unwrap_or_default();
+        // A cancelled revise session typed nothing, but what was said is kept.
+        let kept = if text.is_empty() { raw.clone() } else { text.clone() };
+        if !kept.is_empty() {
+            self.status.last_text = kept.clone();
             if self.cfg.history_size > 0 {
-                self.history.push_back(text.clone());
+                let raw = if raw != kept { raw.clone() } else { String::new() };
+                self.history.push_back(HistoryItem { text: kept.clone(), raw });
                 while self.history.len() > self.cfg.history_size {
                     self.history.pop_front();
                 }
@@ -503,10 +612,17 @@ impl Daemon {
                 e
             };
             self.desktop.notify("Dictation failed", &body, true, d.note).await;
+        } else if let Some(why) = d.unrevised {
+            // Shown even with notifications off: the text isn't what was asked for.
+            self.status.last_error = format!("Typed without AI revision. {why}");
+            self.desktop.notify("Typed without AI revision", &why, false, d.note).await;
         } else if d.reason == Reason::TooShort {
             self.desktop.close_notification(d.note).await;
         } else if self.cfg.notifications {
             let (summary, body) = match (d.reason, text.is_empty(), d.outcome.held) {
+                (Reason::Cancelled, _, _) if text.is_empty() && !raw.is_empty() => {
+                    ("Cancelled", "What you said is in Recent text in Settings.".into())
+                }
                 (Reason::Cancelled, _, _) => ("Cancelled", String::new()),
                 (_, true, _) => ("Stopped", "No speech recognized".into()),
                 (_, false, true) => (
@@ -537,23 +653,77 @@ impl Daemon {
 
     async fn stt(&mut self, id: u64, ev: SttEvent) {
         let persian = self.cfg.typing.persian_letters;
-        let Some(s) = self.session.as_mut().filter(|s| s.id == id) else { return };
+        // After Finished, a revise session waits for the AI; the provider
+        // task's closing Error must not end it.
+        let Some(s) = self.session.as_mut().filter(|s| s.id == id && !s.finished) else { return };
         match ev {
             SttEvent::Final(text) => {
                 let text = if persian { normalize::persian_letters(&text) } else { text };
                 tracing::debug!("final: {text:?}");
-                if let Some(t) = &s.typing {
+                if let Some(r) = s.revision.as_mut() {
+                    r.transcript.push_str(&text);
+                } else if let Some(t) = &s.typing {
                     t.push(text);
                 }
             }
             SttEvent::Partial(_) => {}
             SttEvent::Heard => s.last_heard = Instant::now(),
             SttEvent::Finished => {
-                let error = s.stopping.is_none().then(|| "the microphone recording stopped unexpectedly".to_owned());
-                self.end(error, None).await;
+                s.finished = true;
+                if s.stopping.is_none() {
+                    self.end(Some("the microphone recording stopped unexpectedly".into()), None).await;
+                } else if s.revision.is_some() {
+                    self.start_revision().await;
+                } else {
+                    self.end(None, None).await;
+                }
             }
-            SttEvent::Error(e) => self.end(Some(e), None).await,
+            SttEvent::Error(e) => {
+                s.finished = true;
+                self.end(Some(e), None).await;
+            }
         }
+    }
+
+    /// Sends the whole transcript to the AI; typing waits for its answer.
+    async fn start_revision(&mut self) {
+        let Some(s) = self.session.as_mut() else { return };
+        let Some(r) = s.revision.as_mut() else { return };
+        let text = r.transcript.trim().to_owned();
+        if text.is_empty() {
+            self.end(None, None).await;
+            return;
+        }
+        let (client, hints) = (r.client.clone(), r.hints.clone());
+        let timeout = revise::timeout_for(&text, r.timeout);
+        let (tx, id) = (self.tx.clone(), s.id);
+        let task = tokio::spawn(async move {
+            let result = revise::revise_or_raw(&client, &text, &hints, timeout).await;
+            let _ = tx.send(Msg::Revised(id, result));
+        });
+        r.running = Some((Instant::now(), task));
+        let name = r.client.kind().name();
+        if self.cfg.notifications {
+            s.note = self.desktop.notify("Revising…", name, false, s.note).await;
+        }
+        self.status.state = State::Revising;
+        self.update_tray().await;
+    }
+
+    async fn revised(&mut self, id: u64, result: Revised) {
+        let persian = self.cfg.typing.persian_letters;
+        let Some(s) = self.session.as_mut().filter(|s| s.id == id) else { return };
+        let Some(r) = s.revision.as_mut().filter(|r| r.running.is_some()) else { return };
+        if let Some((started, _)) = r.running.take() {
+            tracing::debug!("revision came back after {} ms", started.elapsed().as_millis());
+        }
+        let text = if persian { normalize::persian_letters(&result.text) } else { result.text };
+        if let Some(t) = &s.typing {
+            t.push(text);
+        }
+        r.typed = true;
+        r.unrevised = result.note;
+        self.end(None, None).await;
     }
 
     async fn typing_event(&mut self, id: u64, ev: mirza_inject::Event) {
@@ -596,7 +766,9 @@ impl Daemon {
         }
         let Some(s) = self.session.as_ref() else { return };
         match s.stopping {
-            Some(t) if t.elapsed() > STOP_TAIL + FINISH_TIMEOUT => {
+            // Once the transcript is complete, a revise session waits for the
+            // AI, which has its own time limit.
+            Some(t) if t.elapsed() > STOP_TAIL + FINISH_TIMEOUT && !s.finished => {
                 self.end(Some("timed out waiting for the final transcript".into()), None).await;
             }
             Some(_) => {}
@@ -625,13 +797,14 @@ impl Daemon {
                     t.hold(true);
                 }
                 let Some(sc) = self.cfg.shortcuts.iter().find(|s| s.id() == id).cloned() else { return };
+                let revise = sc.action == ShortcutAction::Revise;
                 let _ = match (sc.action, sc.mode) {
-                    (ShortcutAction::Dictate, Mode::Toggle) => self.toggle().await,
-                    (ShortcutAction::Dictate, Mode::Hold) => {
+                    (ShortcutAction::Dictate | ShortcutAction::Revise, Mode::Toggle) => self.toggle_kind(revise).await,
+                    (ShortcutAction::Dictate | ShortcutAction::Revise, Mode::Hold) => {
                         if self.session.is_none() {
-                            self.start(Some(id)).await
+                            self.start(Some(id), revise).await
                         } else {
-                            self.stop(Reason::User);
+                            self.press_during_session().await;
                             Ok(())
                         }
                     }
@@ -701,8 +874,12 @@ impl Daemon {
                 Ok(())
             }
             TrayAction::SetProvider(id) => self.set_provider(&id).await,
+            // The clipboard is busy with typing until the session ends.
+            TrayAction::CopyLast if self.session.is_some() => {
+                Err("Mirza is still dictating. Copy the last text once it's typed.".into())
+            }
             TrayAction::CopyLast => match (self.history.back(), self.desktop.injector()) {
-                (Some(t), Ok(inj)) => inj.copy(t).map_err(|e| e.to_string()),
+                (Some(h), Ok(inj)) => inj.copy(&h.text).map_err(|e| e.to_string()),
                 _ => Ok(()),
             },
             TrayAction::OpenSettings => self.open_settings(),
@@ -848,7 +1025,8 @@ impl Daemon {
     fn snapshot(&self) -> Snapshot {
         Snapshot {
             status: self.status.clone(),
-            history: self.history.iter().cloned().collect(),
+            history: self.history.iter().map(|h| h.text.clone()).collect(),
+            history_raw: self.history.iter().map(|h| h.raw.clone()).collect(),
             usage: self.usage.as_ref().map(|(provider, u)| UsageInfo {
                 provider: provider.clone(),
                 today: u.today,

@@ -13,7 +13,7 @@ mod ipc;
 use std::io::{BufRead, IsTerminal, Write};
 use std::process::ExitCode;
 
-use mirza_core::config::{self, PROVIDERS};
+use mirza_core::config;
 use mirza_core::ipc::Request;
 use mirza_core::secrets;
 
@@ -23,6 +23,7 @@ Without a command, starts Mirza in the tray.
 
 Commands for the running app:
   toggle             start dictating, or stop if already dictating
+  toggle-revise      the same, with the text revised by AI before it's typed
   start | stop       start or stop dictating
   cancel             stop now, without waiting for the rest of the text
   status             show what Mirza is doing
@@ -34,7 +35,8 @@ Commands for the running app:
   quit               close Mirza
 
 Other commands:
-  set-key <provider> save an API key (read from standard input)
+  set-key <service>  save an API key (read from standard input): soniox,
+                     elevenlabs, openai, gemini, claude, openrouter or local
   config-path        print where the settings file is
 ";
 
@@ -63,6 +65,7 @@ fn main() -> ExitCode {
         }
         ("set-key", Some(p)) => return set_key(&p),
         ("toggle", _) => Request::Toggle,
+        ("toggle-revise", _) => Request::ToggleRevise,
         ("start", _) => Request::Start,
         ("stop", _) => Request::Stop,
         ("cancel", _) => Request::Cancel,
@@ -105,12 +108,14 @@ fn main() -> ExitCode {
 }
 
 fn set_key(provider: &str) -> ExitCode {
-    if !PROVIDERS.contains(&provider) {
-        eprintln!("mirza: unknown provider {provider:?} (use {})", PROVIDERS.join(", "));
+    let services = secrets::services();
+    if !services.contains(&provider) {
+        eprintln!("mirza: unknown service {provider:?} (use {})", services.join(", "));
         return ExitCode::from(2);
     }
     if std::io::stdin().is_terminal() {
-        print!("Paste the {} API key and press Enter: ", config::provider_name(provider));
+        let name = mirza_core::ai::Kind::parse(provider).map_or(config::provider_name(provider), |k| k.name());
+        print!("Paste the {name} API key and press Enter: ");
         let _ = std::io::stdout().flush();
     }
     let mut key = String::new();
