@@ -88,7 +88,12 @@ pub async fn serve(replies: Vec<Reply>) -> Mock {
                 }
                 buf.extend_from_slice(&chunk[..n]);
             }
-            let body = serde_json::from_slice(&buf[head_end..]).unwrap_or(Value::Null);
+            // JSON bodies as JSON, anything else (a form) as text.
+            let raw = &buf[head_end..];
+            let body = serde_json::from_slice(raw).unwrap_or_else(|_| match raw.is_empty() {
+                true => Value::Null,
+                false => Value::String(String::from_utf8_lossy(raw).into_owned()),
+            });
             log.lock().unwrap().push(Seen { method, target, headers, body });
             let r = replies.next().unwrap_or_else(|| reply(500, r#"{"error":{"message":"no more replies"}}"#));
             tokio::time::sleep(r.delay).await;

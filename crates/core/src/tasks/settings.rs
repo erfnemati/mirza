@@ -52,6 +52,12 @@ pub const BUILT_IN_CLIENT_ID: &str = match option_env!("MIRZA_GOOGLE_CLIENT_ID")
     None => "",
 };
 
+/// The secret that goes with [`BUILT_IN_CLIENT_ID`].
+pub const BUILT_IN_CLIENT_SECRET: &str = match option_env!("MIRZA_GOOGLE_CLIENT_SECRET") {
+    Some(s) => s,
+    None => "",
+};
+
 impl TaskSettings {
     /// The AI to use: this section's own, else AI revision's. None when both
     /// are off.
@@ -62,11 +68,16 @@ impl TaskSettings {
         }
     }
 
-    /// The OAuth client ID to sign in with; None when there is none.
-    pub fn client_id(&self) -> Option<&str> {
+    /// The OAuth client to sign in with, and its secret; None when there is
+    /// no client.
+    pub fn client(&self) -> Option<(String, Option<String>)> {
         match self.google_client_id.trim() {
-            "" => Some(BUILT_IN_CLIENT_ID.trim()).filter(|id| !id.is_empty()),
-            id => Some(id),
+            "" if BUILT_IN_CLIENT_ID.trim().is_empty() => None,
+            "" => {
+                let secret = Some(BUILT_IN_CLIENT_SECRET.trim().to_owned()).filter(|s| !s.is_empty());
+                Some((BUILT_IN_CLIENT_ID.trim().to_owned(), secret))
+            }
+            id => Some((id.to_owned(), crate::secrets::get(crate::secrets::GOOGLE_CLIENT_SECRET).map(|(s, _)| s))),
         }
     }
 
