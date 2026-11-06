@@ -34,3 +34,7 @@ cpal = "0.18.2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Media_Audio", "Win32_System_Registry"] }
+
+[dev-dependencies]
+# Log output for the examples (MIRZA_LOG=mirza=debug).
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

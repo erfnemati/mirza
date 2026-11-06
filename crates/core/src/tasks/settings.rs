@@ -87,6 +87,46 @@ impl TaskSettings {
     }
 }
 
+/// Reads what was pasted for the Google client: the JSON file Google gives
+/// for a Desktop client, or just a client ID. Returns the ID and the secret.
+pub fn read_client(pasted: &str) -> Result<(String, Option<String>), String> {
+    let t = pasted.trim();
+    if t.is_empty() {
+        return Err("Paste the client file from Google, or its client ID.".into());
+    }
+    if !t.starts_with('{') {
+        return match t.ends_with(".apps.googleusercontent.com") && !t.contains(char::is_whitespace) {
+            true => Ok((t.to_owned(), None)),
+            false => Err("That isn't a Google client ID; it ends in .apps.googleusercontent.com.".into()),
+        };
+    }
+    let v: serde_json::Value =
+        serde_json::from_str(t).map_err(|_| "That isn't the whole client file; paste all of it.".to_owned())?;
+    if v.get("web").is_some() {
+        return Err("This is a Web application client. Create a Desktop app client instead (see the guide).".into());
+    }
+    let c = v.get("installed").unwrap_or(&v);
+    let id = c["client_id"].as_str().map(str::trim).unwrap_or_default();
+    if id.is_empty() {
+        return Err("The file has no client ID. Download the client file again from Google.".into());
+    }
+    let secret = c["client_secret"].as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned);
+    Ok((id.to_owned(), secret))
+}
+
+/// Keeps the Google client: the ID in the config file, the secret with the
+/// API keys. A client without a secret removes an old one.
+pub fn save_client(config_path: &std::path::Path, id: &str, secret: Option<&str>) -> std::io::Result<()> {
+    crate::secrets::set(crate::secrets::GOOGLE_CLIENT_SECRET, secret.unwrap_or(""))?;
+    let v = match id.trim() {
+        "" => serde_json::Value::Null,
+        id => id.into(),
+    };
+    crate::config::update_file(config_path, |doc| {
+        let _ = crate::config::set_json(doc, "tasks.google_client_id", &v);
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,5 +148,19 @@ mod tests {
         assert_eq!(t.list_hints["MDE2"], "office, Acme");
         assert_eq!(t.event_minutes(), 5);
         assert!(toml::from_str::<TaskSettings>("lists = 1").is_err());
+    }
+
+    #[test]
+    fn client_files() {
+        let file = r#"{"installed":{"client_id":"123-abc.apps.googleusercontent.com","project_id":"mirza","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","client_secret":"GOCSPX-x","redirect_uris":["http://localhost"]}}"#;
+        assert_eq!(read_client(file).unwrap(), ("123-abc.apps.googleusercontent.com".into(), Some("GOCSPX-x".into())));
+        assert_eq!(
+            read_client(" 123-abc.apps.googleusercontent.com\n").unwrap(),
+            ("123-abc.apps.googleusercontent.com".into(), None)
+        );
+        assert!(read_client(r#"{"web":{"client_id":"x"}}"#).unwrap_err().contains("Desktop app"));
+        assert!(read_client(r#"{"installed":{"client_id":"#).unwrap_err().contains("whole"));
+        assert!(read_client("hello").is_err());
+        assert!(read_client("").is_err());
     }
 }

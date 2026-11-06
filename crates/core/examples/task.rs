@@ -6,24 +6,134 @@
 //! Without text it reads one task per line from stdin (lines starting with #
 //! are skipped). Model and address come from the config file unless given;
 //! the key comes from the usual places (keys file, MIRZA_<ID>_API_KEY).
+//!
+//! The rest use Google with the settings and the queue the app uses:
+//!   task login [--client client.json]   sign in (paste the final address if no browser)
+//!   task lists                          the account's lists
+//!   task add "call Sara tomorrow at 3"  save a task, as the shortcut does
+//!   task waiting | retry | recent       the queue and the saved tasks
+//!   task undo ID                        take a task back
+//!   task logout
 
 use std::io::BufRead;
 use std::time::{Duration, Instant};
 
 use mirza_core::ai::{Client, Kind};
 use mirza_core::config::{self, Config};
-use mirza_core::tasks::{List, parse, when};
+use mirza_core::tasks::{self, List, Store, parse, when};
 use mirza_core::{net, secrets};
 
-const USAGE: &str = "usage: task parse <openai|gemini|claude|openrouter|local> [--model M] [--effort E] [--lists A,B] [--now ZONED] [--pause ms] [text]";
+const USAGE: &str = "usage: task parse <openai|gemini|claude|openrouter|local> [--model M] [--effort E] [--lists A,B] [--now ZONED] [--pause ms] [text]
+       task login [--client FILE] | lists | add TEXT | waiting | retry | recent | undo ID | logout";
 
 #[tokio::main]
 async fn main() {
-    let mut args = std::env::args().skip(1);
-    match args.next().as_deref() {
-        Some("parse") => parse_cmd(args).await,
-        _ => eprintln!("{USAGE}"),
+    if std::env::var_os("MIRZA_LOG").is_some() {
+        tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::from_env("MIRZA_LOG")).init();
     }
+    let mut args = std::env::args().skip(1);
+    let cmd = args.next().unwrap_or_default();
+    let r = match cmd.as_str() {
+        "parse" => {
+            parse_cmd(args).await;
+            Ok(())
+        }
+        "login" => login(args).await,
+        "logout" => {
+            let cfg = Config::load(&config::config_path()).unwrap_or_default();
+            tasks::sign_out(&cfg, &Store::new(Store::default_dir())).await.map(|_| println!("Signed out."))
+        }
+        "lists" | "add" | "waiting" | "retry" | "recent" | "undo" => google_cmd(&cmd, args.collect()).await,
+        _ => Err(USAGE.to_owned()),
+    };
+    if let Err(e) = r {
+        eprintln!("{e}");
+        std::process::exit(1);
+    }
+}
+
+async fn login(mut args: impl Iterator<Item = String>) -> Result<(), String> {
+    let path = config::config_path();
+    if let (Some("--client"), Some(file)) = (args.next().as_deref(), args.next()) {
+        let text = std::fs::read_to_string(&file).map_err(|e| format!("{file}: {e}"))?;
+        let (id, secret) = tasks::settings::read_client(&text)?;
+        tasks::settings::save_client(&path, &id, secret.as_deref()).map_err(|e| e.to_string())?;
+        println!("Client saved (secret: {}).", if secret.is_some() { "yes" } else { "none" });
+    }
+    let cfg = Config::load(&path).map_err(|e| e.to_string())?;
+    let (tx, rx) = tokio::sync::mpsc::channel(1);
+    std::thread::spawn(move || {
+        for line in std::io::stdin().lock().lines().map_while(Result::ok) {
+            if tx.blocking_send(line).is_err() {
+                return;
+            }
+        }
+    });
+    let show = |url: &str| {
+        println!("Open this address and sign in:\n\n{url}\n");
+        println!("If the browser is on another device, paste the address it ends up at here.");
+    };
+    let g = tasks::sign_in(&cfg, show, rx).await?;
+    println!("Signed in. Calendar events: {}.", if g.calendar() { "yes" } else { "no (tasks only)" });
+    Ok(())
+}
+
+async fn google_cmd(cmd: &str, args: Vec<String>) -> Result<(), String> {
+    let cfg = Config::load(&config::config_path()).map_err(|e| e.to_string())?;
+    let setup = tasks::Setup::from_config(&cfg);
+    let book = tasks::Book::new(Store::new(Store::default_dir()));
+    let lists = book.lists(&setup, cmd == "lists").await.unwrap_or_default();
+    let today = tasks::Said::now().zoned().date();
+    let print = |o: &tasks::Outcome| {
+        if let Some((title, body)) = tasks::notification(o, &lists, today) {
+            println!("{title}\n  {}", body.replace('\n', "\n  "));
+        }
+    };
+    match cmd {
+        "lists" => {
+            if lists.is_empty() {
+                book.lists(&setup, true).await.map_err(|e| e.to_string())?;
+            }
+            for l in &lists {
+                println!("{}  {}", l.id, l.title);
+            }
+        }
+        "add" => {
+            let text = args.join(" ");
+            if text.trim().is_empty() {
+                return Err(USAGE.into());
+            }
+            let e = book.capture(&text, tasks::Said::now(), false).map_err(|e| e.to_string())?;
+            let o = book.process(&setup, &e.id).await;
+            print(&o);
+            println!("  (id {})", e.id);
+        }
+        "waiting" => {
+            for e in book.waiting() {
+                let next = jiff::Timestamp::from_millisecond(e.next_try_ms).map(|t| t.to_string()).unwrap_or_default();
+                println!("{}  tries {}  next {next}  {}", e.id, e.attempts, e.last_error);
+            }
+        }
+        "retry" => {
+            book.retry_now();
+            for o in book.process_due(&setup).await {
+                print(&o);
+            }
+        }
+        "recent" => {
+            for s in book.recent() {
+                let w = tasks::when::describe(&s.draft.when(), today);
+                println!("{}  {}  [{}] {w}", s.id, s.draft.title, tasks::list_name(&lists, &s.draft.list));
+            }
+        }
+        "undo" => {
+            let id = args.first().ok_or(USAGE)?;
+            book.undo(&setup, id).await?;
+            println!("Undone.");
+        }
+        _ => return Err(USAGE.into()),
+    }
+    Ok(())
 }
 
 async fn parse_cmd(mut args: impl Iterator<Item = String>) {
