@@ -15,7 +15,7 @@ pub mod revise;
 mod settings;
 
 #[cfg(test)]
-mod mock;
+pub(crate) mod mock;
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};

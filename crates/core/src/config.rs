@@ -48,6 +48,8 @@ pub struct Config {
     pub revision: crate::ai::Revision,
     /// AI providers: model, address and thinking effort for each.
     pub ai: crate::ai::AiProviders,
+    /// Voice tasks: what you say becomes a Google Tasks entry.
+    pub tasks: crate::tasks::TaskSettings,
     /// Prepaid credit per provider, so the app can show what is left: amount
     /// minus spend since the date.
     pub credit: BTreeMap<String, Credit>,
@@ -74,6 +76,7 @@ impl Default for Config {
             providers: Providers::default(),
             revision: crate::ai::Revision::default(),
             ai: crate::ai::AiProviders::default(),
+            tasks: crate::tasks::TaskSettings::default(),
             credit: BTreeMap::new(),
         }
     }
@@ -533,6 +536,19 @@ pub const TEMPLATE: &str = r#"# Mirza settings. Every key is optional; the value
 # [ai.local]                      # an OpenAI-compatible server (vLLM, Ollama, LM Studio)
 # base_url = "http://localhost:8000/v1"
 # model = ""                      # empty: the first model the server lists
+
+# Voice tasks (the "task" shortcut): what you say becomes a Google Tasks
+# entry, and also a Google Calendar event when you say a clock time.
+# [tasks]
+# provider = ""                   # AI to use: "" (the one AI revision uses), openai, gemini, claude, openrouter or local
+# timeout_sec = 30                # then the task is saved as said
+# google_client_id = ""           # your own Google OAuth client ("" for the one built into Mirza, if any)
+# default_list = ""               # Google Tasks list id for tasks that fit no list ("" for your default list)
+# event_minutes = 30              # event length when you don't say one
+# timed_due_date = true           # a task with a time also gets that day as its due date
+#
+# [tasks.list_hints]              # other names for a list, by list id (easier in the settings window)
+# "MDE2NjQ..." = "office, Acme"
 
 # [credit.soniox]                 # prepaid credit, to show what is left
 # amount = 20.0
