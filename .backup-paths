@@ -1,0 +1,6 @@
+# Files that are out of git but expensive or impossible to get back.
+# One path per line, relative to the project root. The laptop copies them with rsync.
+
+# The Android release signing key and its password. Losing it means every user has to
+# uninstall Mirza and install it again. See docs/android-app.md.
+.secrets
