@@ -83,7 +83,8 @@ class TypingService : AccessibilityService() {
         val app = node.packageName
         val method = Prefs.typing
         if (method != TypingMethod.PASTE) {
-            val problem = setText(node, text) ?: return "typed with SET_TEXT into $app" + check(node, text)
+            val problem = setText(node, text, forced = method == TypingMethod.SET_TEXT)
+                ?: return "typed with SET_TEXT into $app" + check(node, text)
             if (method == TypingMethod.SET_TEXT) return "NOT TYPED: SET_TEXT failed in $app ($problem)"
             TrialLog.add("SET_TEXT failed in $app ($problem), trying paste")
         }
@@ -102,15 +103,32 @@ class TypingService : AccessibilityService() {
         return if (last.refresh() && last.isEditable && last.isFocused) last else null
     }
 
-    private fun fieldText(node: AccessibilityNodeInfo): String =
-        if (node.isShowingHintText) "" else node.text?.toString() ?: ""
+    /** Whether the field's text is really its hint, as a plain EditText says or as text equal to the hint. */
+    private fun showsHint(node: AccessibilityNodeInfo): Boolean {
+        if (node.isShowingHintText) return true
+        val text = node.text?.toString() ?: return false
+        return text == node.hintText?.toString()
+    }
 
-    /** Replaces the field's text with itself plus `text` at the cursor. Null on success. */
-    private fun setText(node: AccessibilityNodeInfo, text: String): String? {
+    private fun fieldText(node: AccessibilityNodeInfo): String =
+        if (showsHint(node)) "" else node.text?.toString() ?: ""
+
+    /**
+     * Replaces the field's text with itself plus `text` at the cursor. Null on success.
+     * `forced`: the SET_TEXT mode was picked by hand, so don't hand over to paste.
+     */
+    private fun setText(node: AccessibilityNodeInfo, text: String, forced: Boolean): String? {
         if (node.isPassword) return "password field"
         val old = fieldText(node)
         var s = node.textSelectionStart
         var e = node.textSelectionEnd
+        TrialLog.add("field before typing: ${old.length} chars, hint ${if (showsHint(node)) "shown" else "not shown"}, cursor $s..$e")
+        if (!forced && old.isNotEmpty() && (s < 0 || e < 0)) {
+            // A text field reports a cursor whenever it holds text. Text without a cursor is most
+            // likely the hint shown as text, as Telegram and WhatsApp do with "Message": setting the
+            // text would keep the hint, or could drop real text. Paste goes in at the real cursor.
+            return "the field has text but no cursor, so it may be the hint"
+        }
         if (s < 0 || e < 0 || s > old.length || e > old.length) {
             s = old.length
             e = old.length

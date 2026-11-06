@@ -18,8 +18,8 @@ android {
         applicationId = "dev.erfnemati.mirza.trial"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.5-trial"
+        versionCode = 2
+        versionName = "0.1.5-trial2"
         ndk { abiFilters += rustAbis }
     }
 
