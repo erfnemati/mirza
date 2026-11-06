@@ -216,9 +216,9 @@ fn open(target: &str) -> Result<(), String> {
     let mut cmd = if cfg!(target_os = "macos") {
         std::process::Command::new("open")
     } else if cfg!(windows) {
-        let mut c = std::process::Command::new("cmd");
-        c.args(["/C", "start", ""]);
-        c
+        // Not `cmd /C start`: cmd cuts an address at its first `&`, and
+        // the Google sign-in address has several.
+        std::process::Command::new("explorer")
     } else {
         std::process::Command::new("xdg-open")
     };
