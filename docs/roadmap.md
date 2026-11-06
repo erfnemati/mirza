@@ -15,12 +15,15 @@ Agreed in November 2026. Each step is one or more PRs into `develop`.
    self-correction wins, punctuation, half-spaces, both languages kept) with OpenAI, Gemini,
    Claude, OpenRouter or a local OpenAI-compatible server. A separate "dictate and revise" action;
    if the AI fails or times out, the raw text is typed.
-4. **Voice tasks.** A "capture task" action: speech, then AI, then a typed task (title, notes,
-   list, tags, date, time, priority, repeat) checked against a schema, saved to Google Tasks. The
-   Google Tasks API keeps only the date, so list = category and tags/priority go in the notes.
-   No confirm step: a notification with Undo and Edit. Transcripts wait in a local queue until
-   the task is saved, so nothing is lost offline. Dates resolve against when they were said;
-   Jalali dates are converted in Rust.
+4. **Voice tasks.** Its own shortcut (and its own bubble gesture on the phone): speech, then one
+   AI call through the `[ai.*]` providers with a JSON schema checked in Rust, then a task in
+   Google Tasks: a title of four or five words, a one-line note only for extra details, and the
+   list that fits (one list per project or area, with other names set in the settings; no tags).
+   Google Tasks keeps no time, so a task with a clock time also becomes an event in the main
+   Google Calendar, whose reminder rings. No confirm step: a notification with Undo and Edit.
+   Spoken tasks wait in a queue on disk until Google confirms them, so nothing is lost offline.
+   Dates resolve against when they were said; Jalali dates are converted in Rust. Without AI, or
+   when it fails, the words are saved as said. Guide: [voice-tasks.md](voice-tasks.md).
 5. **Android app.** Kotlin app over the Rust core: floating bubble (size, logo, opacity), gestures
    (tap, double tap, long press) mapped to actions, dictation, AI revision, voice tasks, and
    Mirza's own alarm for tasks with a time (kept in the notes, rings only if still open).

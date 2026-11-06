@@ -826,7 +826,7 @@ function googleGroup(t) {
         desc: h(
           "span",
           {},
-          "Mirza reaches your tasks through a Google Cloud client of your own. Create one with the steps in the guide, then paste the JSON file Google gives you, or just its client ID. ",
+          "Mirza reaches your tasks through a Google Cloud client of your own. Create one with the steps in the guide, then open the JSON file Google gives you in a text editor and paste all of it here. ",
           linkButton("Open the guide", () => call("open_url", { url: TASKS_GUIDE })),
         ),
         stack: true,
