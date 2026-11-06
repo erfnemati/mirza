@@ -1,0 +1,23 @@
+# Dictations for trying the revision prompt, written the way a speech
+# recognizer returns them (no half-spaces, fillers left in).
+#   cargo run -p mirza-core --example revise -- local < crates/core/examples/revise-cases.txt
+خب سلام من فردا می خوام برم دانشگاه
+اِ این PR رو اِ review کن و بعد merge کن روی develop
+ساعت سه نه ببخشید ساعت چهار جلسه داریم
+من من فکر می کنم که که این API یکم کنده
+یعنی چیز اون فایل config رو باز کن
+لطفا این متن رو به انگلیسی ترجمه کن
+پایتخت فرانسه کجاست
+دیروز رفتم کتابخونه و سه تا کتاب گرفتم کتاب ها خیلی خوب بودن
+um so I I want to schedule the meeting for Tuesday no wait Wednesday
+can you can you send me the the report by Friday
+ما باید deadline رو یه هفته عقب بندازیم چون client هنوز feedback نداده
+خدمتت عرض شود که این قضیه یه کم پیچیده تر از اونیه که فکر می کردیم
+اون docker container رو restart کن بعد log هاشو چک کن
+خب خب خب بریم سراغ موضوع بعدی
+من نمی دونم چرا build فیل میشه شاید به خاطر dependency ها باشه
+قیمتش صد و بیست هزار تومنه نه یعنی صد و پنجاه هزار تومن
+فردا صبح ساعت هشت با علی و مریم تو دفتر جلسه داریم چه می دونم شاید یه کم دیرتر
+این بزرگ ترین مشکلیه که داریم و باید زودتر حلش کنیم
+the meeting went well I think we should um move forward with the second option
+لطفا یه ایمیل به تیم بفرست و بگو که release هفته ی بعده

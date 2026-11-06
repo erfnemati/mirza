@@ -36,7 +36,7 @@ Do:
 - Remove fillers and hesitation sounds: um, uh, er, \"like\" and \"you know\" used as fillers; in Persian «اِ», «ام», «اوم», «چیز», and «خب», «یعنی», «دیگه», «چه می‌دونم», «خدمتت عرض شود» when they add no meaning.
 - Remove stutters and words repeated by mistake (\"the the\", «و و و»).
 - When the speaker corrects themselves (\"no, I mean\", \"sorry\", \"actually\", «نه»، «نه یعنی»، «ببخشید»، «اشتباه گفتم»), keep only the corrected version.
-- Fix punctuation and capital letters. Use Persian punctuation (، ؛ ؟) in Persian sentences and English punctuation in English ones.
+- Fix punctuation and capital letters, and end every sentence with a period, question mark or exclamation mark. Use Persian punctuation (، ؛ ؟) in Persian sentences and English punctuation in English ones.
 - Write Persian half-spaces (zero-width non-joiner, U+200C) where they belong: «می‌خوام»، «نمی‌دونم»، «کتاب‌ها»، «خونه‌ای»، «بزرگ‌تر».
 - Fix a word the recognizer clearly misheard, but only when the intended word is obvious.
 
