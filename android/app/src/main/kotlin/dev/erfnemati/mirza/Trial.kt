@@ -1,6 +1,8 @@
 package dev.erfnemati.mirza
 
+import android.app.ActivityManager
 import android.app.Application
+import android.app.ApplicationExitInfo
 import android.app.ForegroundServiceStartNotAllowedException
 import android.content.Context
 import android.content.SharedPreferences
@@ -43,6 +45,34 @@ class TrialApp : Application() {
             "started: Mirza trial ${BuildConfig.VERSION_NAME}, core ${dev.erfnemati.mirza.core.coreVersion()}, " +
                 "${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
         )
+        logLastExit()
+        TrialLog.add("typing service on in Accessibility settings: ${if (TypingService.enabledInSettings(this)) "yes" else "NO"}")
+    }
+
+    /** How the app's last process ended: shows whether the phone force-stopped it, which turns typing off. */
+    private fun logLastExit() {
+        if (Build.VERSION.SDK_INT < 30) return
+        val exit = runCatching {
+            getSystemService(ActivityManager::class.java).getHistoricalProcessExitReasons(packageName, 0, 1).firstOrNull()
+        }.getOrNull() ?: return
+        val at = SimpleDateFormat("MM-dd HH:mm:ss", Locale.US).format(Date(exit.timestamp))
+        val why = when (exit.reason) {
+            ApplicationExitInfo.REASON_EXIT_SELF -> "exited by itself"
+            ApplicationExitInfo.REASON_SIGNALED -> "killed"
+            ApplicationExitInfo.REASON_LOW_MEMORY -> "low memory"
+            ApplicationExitInfo.REASON_CRASH, ApplicationExitInfo.REASON_CRASH_NATIVE -> "crashed"
+            ApplicationExitInfo.REASON_ANR -> "not responding"
+            ApplicationExitInfo.REASON_PERMISSION_CHANGE -> "a permission changed"
+            ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "used too much battery or CPU"
+            ApplicationExitInfo.REASON_USER_REQUESTED -> "FORCE STOPPED (typing turns off)"
+            ApplicationExitInfo.REASON_USER_STOPPED -> "stopped by the user"
+            ApplicationExitInfo.REASON_DEPENDENCY_DIED -> "something it needed died"
+            ApplicationExitInfo.REASON_OTHER -> "other (often the phone's own cleaner)"
+            14 -> "frozen"
+            15, 16 -> "app updated or changed"
+            else -> "unknown"
+        }
+        TrialLog.add("last exit: $why (reason ${exit.reason}) at $at" + (exit.description?.let { ", \"$it\"" } ?: ""))
     }
 }
 

@@ -52,6 +52,11 @@ Experiment switches:
 | Microphone on tap | A: the bubble's foreground service adds the `microphone` type on tap; B: a separate microphone service started on tap; C: the bubble's service has the `microphone` type all the time; D: no microphone service, just record |
 | Typing | set text (spliced at the cursor) with paste as fallback; set text only; paste only |
 
+Since build trial3 the screen shows a button when typing isn't running ("Typing is off" or "on
+but not running"), which opens the accessibility settings, and each start of
+the app logs how its last process ended and whether typing is on in the settings. The screen stays
+out of the recent apps once you leave it (see "First results on Erfan's phone").
+
 Every tap writes one line with the modes, the Android version and the app in front, then whether
 each service start was accepted or refused (with the exception), and after two seconds whether the
 audio is real or all zeros and whether Android says it silenced the app (Android mutes the
@@ -208,6 +213,20 @@ Xiaomi with HyperOS 1.0 on Android 13, 2026-11-06. This is a first run, not yet 
   notification ("If you don't want Mirza trial to use this feature, tap to open settings and turn
   it off"), and the app shows "Bubble on". On the emulator, the accessibility bubble with mode B
   showed neither while idle, only the microphone notification while recording.
+- Trial2 fixed "Message" in Telegram and WhatsApp.
+- Swiping Mirza trial away in the recent apps turned typing off: the service was off in
+  Accessibility, and he had to turn it on again (and off and on once more) before the bubble came
+  back. On the emulator, a force stop (`am force-stop`) does exactly that: Android removes a
+  force-stopped app's accessibility service from the enabled list, by design. A plain kill of the
+  process doesn't: Android restarted the service and the bubble came back by itself within 5
+  seconds. So HyperOS force-stops an app swiped away in recents, as Xiaomi is known to do for apps
+  not locked there. No app can stop that. Build trial3 keeps its screen out of recents once you
+  leave it, so there is no card to swipe; logs how the last process ended ("FORCE STOPPED" is the
+  case above); shows a button to the accessibility settings when typing is off; and on Xiaomi
+  adds buttons for Autostart and Battery saver ("No restrictions"). Whether HyperOS's "clear all"
+  still stops it is not known yet.
+- The accessibility bubble also shows on the lock screen. There it could only type into the PIN
+  field, so trial3 never types into password fields (before, the paste fallback could).
 
 ## What it means for the Android app (step 5)
 
@@ -228,6 +247,16 @@ Xiaomi with HyperOS 1.0 on Android 13, 2026-11-06. This is a first run, not yet 
   cursor means the field is empty or unknown) and paste when in doubt.
 - Keep audio while connecting instead of dropping it after 10 seconds, and give phone-specific
   error wording.
+- Closing Mirza from recents must not turn typing off: keep the settings screen out of recents,
+  check at every start whether the service is on and offer a one-tap way back, and in the Xiaomi
+  setup ask for Autostart and Battery saver "No restrictions". The way back can only be the
+  Accessibility list: opening one service's own page there needs a system permission
+  (`OPEN_ACCESSIBILITY_DETAILS_SETTINGS`). A keyboard (IME) may not have this
+  problem; untested.
+- On the lock screen the bubble stays, but Mirza never types or acts there (Erfan, 2026-11-06). A
+  spoken command (for now only "add a task") goes into a queue on the phone, at most 10, and the
+  limit can be set lower but never higher. After unlocking, Mirza shows the queue and runs only the
+  commands he confirms. Recognition needs the internet, so with no connection nothing is queued.
 
 ## The emulator on this server
 
@@ -280,8 +309,10 @@ contains recognized text only if you turn that switch on.
    log: "audio OK" or "SILENT", whether Android says it silenced the app, "refused" with the
    reason, how many pieces were typed, and how many partial updates came back.
 10. With bubble 2 and choice B (what the real app would use): lock the screen and unlock it again,
-    turn battery saver on, and swipe Mirza trial away from the recent apps. Does the bubble
-    survive, and does dictation still work?
+    turn battery saver on, and use "clear all" in the recent apps. Does the bubble survive, and does
+    dictation still work? On Xiaomi, first turn on Autostart and set Battery saver to "No
+    restrictions" with the buttons in the app. After a restart of the app, the log's "last exit"
+    line says how it ended.
 11. Watch for the green microphone dot at the top of the screen while it listens, and whether it
     goes away after.
 12. Back in the app, tap "Copy log" and send the log.
