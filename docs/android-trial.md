@@ -225,6 +225,8 @@ Xiaomi with HyperOS 1.0 on Android 13, 2026-11-06. This is a first run, not yet 
   case above); shows a button to the accessibility settings when typing is off; and on Xiaomi
   adds buttons for Autostart and Battery saver ("No restrictions"). Whether HyperOS's "clear all"
   still stops it is not known yet.
+- Trial3 on the phone: after Home, Mirza trial leaves recents and the bubble keeps working.
+  Swiping it away while its screen is still open stops it, bubble included, as expected.
 - The accessibility bubble also shows on the lock screen. There it could only type into the PIN
   field, so trial3 never types into password fields (before, the paste fallback could).
 
