@@ -17,7 +17,10 @@ has() { pactl list short "$1" | cut -f2 | grep -qx "$2"; }
 
 case "${1:-}" in
 start)
-  pulseaudio --check 2>/dev/null || pulseaudio --start --exit-idle-time=-1 --log-target=syslog
+  # Where systemd runs PulseAudio for the user (socket activation), a second daemon
+  # started by hand makes every client fail with "Connection refused": use systemd's.
+  systemctl --user start pulseaudio.service 2>/dev/null ||
+    pulseaudio --check 2>/dev/null || pulseaudio --start --exit-idle-time=-1 --log-target=syslog
   has sinks "$FEED" || pactl load-module module-null-sink sink_name=$FEED \
     sink_properties=device.description=Mirza-mic-feed >/dev/null
   has sinks "$SPEAKER" || pactl load-module module-null-sink sink_name=$SPEAKER \
@@ -41,7 +44,11 @@ play)
     pacat --device=$FEED --format=s16le --channels=1 --rate=48000 --latency-msec=50
   ;;
 stop)
-  pulseaudio --kill 2>/dev/null || true
+  if systemctl --user is-active --quiet pulseaudio.service 2>/dev/null; then
+    systemctl --user stop pulseaudio.service 2>/dev/null
+  else
+    pulseaudio --kill 2>/dev/null || true
+  fi
   echo "stopped"
   ;;
 *)
