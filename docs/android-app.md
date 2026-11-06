@@ -103,31 +103,45 @@ assistant (long press on power) only if Erfan asks.
 
 ## Voice tasks on Android
 
-Step 4 builds the task code in the core: the AI parser, the Google Tasks and Calendar calls, and
-the queue that keeps a transcript until the task is saved. Android adds:
+Step 4 (PR erfnemati/mirza#10) builds the task code in the core (`crates/core/src/tasks/`): the
+AI parser (one call through the same `[ai.*]` providers as revision, dates and Jalali in Rust),
+the Google Tasks and Calendar calls, and the queue that keeps a transcript until Google confirms
+the task. The phone uses it through `TaskBook` in `crates/mobile/src/tasks.rs`: `capture`,
+`capture_held`, `confirm`, `process`, `process_due`, `retry_now`, `next_due_ms`, `waiting`,
+`recent`, `lists`, `undo`, `edit`. Calls that reach Google or the AI block, so Kotlin runs them on
+`Dispatchers.IO`; `capture`, `capture_held` and `confirm` are fast. The notification's title and
+text come from the core (`TaskOutcome`); showing it and its buttons is Kotlin's job. Android adds:
 
 - **Google sign-in through Google Play services** (`AuthorizationClient`, Erfan's pick of
-  2026-11-06): one tap, no secret in the app, Google's way for Android. Sign-in and every token
-  refresh use the phone's own network, not Mirza's proxy, so the phone's VPN has to reach Google
-  at that moment; the Tasks and Calendar calls themselves still go through the proxy. Needs Play
-  services (global Xiaomi phones have it). Kotlin hands the core an access token, which lasts
-  about an hour, so it fetches a fresh one (`authorize()`, silent once allowed) before every core
-  call, retries included. Erfan creates the Google Cloud project (his name) with an Android OAuth
-  client for `dev.erfnemati.mirza` and the SHA-1 under "Signing key", published "In production" without
-  verification: up to 100 users and a warning screen once ("Testing" would end the sign-in every
-  7 days).
-- **The capture flow:** gesture, microphone service, Soniox, then the core's task call, then a
-  notification "Added: <title> (<list>)" with Undo and Edit. Edit opens the task panel.
-- **One queue.** The lock-screen queue is the core's own queue with a "needs confirmation" flag:
-  while the phone is locked (`KeyguardManager.isKeyguardLocked`), Kotlin stores the transcript
-  with that flag and sends nothing to the AI or Google. After unlock, one notification lists the
-  queued tasks; tapping it opens the panel to confirm or drop them. Recognition needs the
-  internet, so with no connection nothing is recorded. A full queue refuses new tasks with a
-  message (to confirm with Erfan). Asked of step 4: the flag on its queue.
-- **One retry job:** a WorkManager job with a network constraint that gets a token and calls the
-  core to save what is waiting (not the tasks still needing confirmation).
+  2026-11-06): one tap, no secret in the app, Google's way for Android. It asks for exactly the
+  scopes the desktop uses: `https://www.googleapis.com/auth/tasks` and
+  `https://www.googleapis.com/auth/calendar.events.owned`. Sign-in and every token refresh use
+  the phone's own network, not Mirza's proxy, so the phone's VPN has to reach Google at that
+  moment; the Tasks and Calendar calls themselves go through the proxy (`TaskConfig.proxy`).
+  Needs Play services (global Xiaomi phones have it). There is no refresh token on the phone: the
+  core calls Kotlin's `GoogleTokens.access_token(fresh)` before every Google call, retries
+  included, and Kotlin answers with `authorize()` (silent once allowed). `fresh = true` means
+  Google just refused the last token, so Kotlin clears it first and asks for a new one. The
+  Google Cloud project "Mirza" is the desktop's; Erfan adds an Android OAuth client "Mirza
+  Android" for `dev.erfnemati.mirza` with the SHA-1 under "Signing key" (step 7 of
+  `docs/voice-tasks.md`). It is published "In production" without verification: up to 100 users
+  and a warning screen once ("Testing" would end the sign-in every 7 days).
+- **The capture flow:** gesture, microphone service, Soniox, then `capture` and `process`, then a
+  notification "Added: <title> (<list>)" with Undo and Edit. Edit opens the task panel. Events
+  use the calendar's default reminders; Mirza has no alarm or reminder of its own.
+- **One queue.** The lock-screen queue is the core's own queue with a hold flag: while the phone
+  is locked (`KeyguardManager.isKeyguardLocked`), Kotlin calls `capture_held(text)`, which stores
+  only the transcript and sends nothing to the AI or Google. After unlock, one notification lists
+  the held tasks; tapping it opens the panel, where `confirm(id)` then `process(id)` saves one,
+  `edit` also releases it, and `undo` drops it. Times are read from the moment the task was
+  said, so "tomorrow" stays the day after it was said even if it is confirmed later; the panel
+  shows the resolved date. Recognition needs the internet, so with no connection nothing is
+  recorded. `TaskConfig.held_limit` (1 to 10) caps the queue; when it is full `capture_held`
+  refuses with a plain message (to confirm with Erfan).
+- **One retry job:** a WorkManager job with a network constraint, first run after
+  `next_due_ms`, that gets a token and calls `process_due` (held tasks are skipped).
 - Sign-in, the Tasks screen and the task panel are Kotlin and can be built against a stub before
-  step 4 is merged; only the real task call waits for it.
+  step 4 is merged; only the real task calls wait for it.
 
 ## Order of work (one PR each into develop)
 
