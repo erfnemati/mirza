@@ -4,12 +4,15 @@ import android.accessibilityservice.AccessibilityService
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.PersistableBundle
+import android.provider.Settings
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -29,6 +32,17 @@ class TypingService : AccessibilityService() {
         /** The app last seen in front, for the log. */
         @Volatile var frontPackage: String? = null
             private set
+
+        /**
+         * Whether the service is switched on in the accessibility settings. It can be on there and
+         * still not running, until Android binds it or after the app's process died.
+         */
+        fun enabledInSettings(ctx: Context): Boolean {
+            val list = Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+                ?: return false
+            val me = ComponentName(ctx, TypingService::class.java)
+            return list.split(':').any { ComponentName.unflattenFromString(it) == me }
+        }
     }
 
     private var lastEditable: AccessibilityNodeInfo? = null
@@ -81,6 +95,9 @@ class TypingService : AccessibilityService() {
     fun type(text: String): String {
         val node = target() ?: return "NOT TYPED: no focused text field (app in front: ${frontPackage ?: "unknown"})"
         val app = node.packageName
+        // Never into a password or PIN field, the lock screen's included: paste would get around the
+        // check in setText, and passwords shouldn't go through a speech service.
+        if (node.isPassword) return "NOT TYPED: password field in $app"
         val method = Prefs.typing
         if (method != TypingMethod.PASTE) {
             val problem = setText(node, text, forced = method == TypingMethod.SET_TEXT)
@@ -118,7 +135,6 @@ class TypingService : AccessibilityService() {
      * `forced`: the SET_TEXT mode was picked by hand, so don't hand over to paste.
      */
     private fun setText(node: AccessibilityNodeInfo, text: String, forced: Boolean): String? {
-        if (node.isPassword) return "password field"
         val old = fieldText(node)
         var s = node.textSelectionStart
         var e = node.textSelectionEnd

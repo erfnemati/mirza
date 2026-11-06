@@ -17,8 +17,11 @@
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault.DayNight">
 
+        <!-- Kept out of recents: Xiaomi force-stops an app swiped away there, and a force stop
+             turns its accessibility service off. Recents shows it only while it is in front. -->
         <activity
             android:name=".MainActivity"
+            android:excludeFromRecents="true"
             android:exported="true"
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize">
