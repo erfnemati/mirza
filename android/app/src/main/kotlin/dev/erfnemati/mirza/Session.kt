@@ -43,6 +43,7 @@ object Session {
     private var recorder: Recorder? = null
     private var startedAt = 0L
     private var pieces = 0
+    private var partials = 0
 
     /** Longest session; a forgotten bubble must not record for hours. */
     private const val MAX_MS = 10 * 60 * 1000L
@@ -59,6 +60,7 @@ object Session {
         app = ctx.applicationContext
         mode = Prefs.micMode
         pieces = 0
+        partials = 0
         setState(State.STARTING)
         TrialLog.add(
             "TAP via $via: mic mode ${mode.name}, bubble ${Prefs.host.name}, " +
@@ -107,7 +109,8 @@ object Session {
                 return fail("couldn't start: ${e.message}")
             }
         }
-        val r = Recorder(sampleRate().toInt()) { pcm -> d?.pushAudio(pcm) }
+        val save = if (Prefs.saveAudio) java.io.File(app.filesDir, "last-recording.pcm") else null
+        val r = Recorder(sampleRate().toInt(), save) { pcm -> d?.pushAudio(pcm) }
         r.start()?.let { err ->
             d?.cancel()
             d?.close()
@@ -191,7 +194,14 @@ object Session {
             main.post { if (dictation != null) typeText(text) }
         }
 
-        override fun onPartial(text: String) {}
+        override fun onPartial(text: String) {
+            main.post {
+                // Only counted, so the log shows whether Soniox heard anything at all.
+                if (dictation != null && partials++ == 0) {
+                    TrialLog.add("first partial text after ${(SystemClock.elapsedRealtime() - startedAt) / 100 / 10.0} s")
+                }
+            }
+        }
 
         override fun onError(message: String) {
             main.post { if (dictation != null) fail("Soniox: $message") }
@@ -200,7 +210,7 @@ object Session {
         override fun onFinished() {
             main.post {
                 if (dictation != null) {
-                    TrialLog.add("transcript complete: $pieces pieces typed")
+                    TrialLog.add("transcript complete: $pieces pieces typed, $partials partial updates")
                     done()
                 }
             }
@@ -212,12 +222,20 @@ object Session {
  * Records 16-bit mono audio in 50 ms chunks on its own thread, and keeps
  * track of the level, so a microphone that Android silences shows up.
  */
-class Recorder(private val rate: Int, private val onChunk: (ByteArray) -> Unit) {
+class Recorder(private val rate: Int, private val save: java.io.File?, private val onChunk: (ByteArray) -> Unit) {
     @Volatile private var running = false
     private var thread: Thread? = null
     private var rec: AudioRecord? = null
 
     @Volatile private var chunks = 0
+
+    /** Chunks with at least one non-zero sample. */
+    @Volatile private var soundChunks = 0
+
+    /** What Android says about this recording: silenced at some point, and not silenced at some point. */
+    @Volatile private var silencedSeen = false
+
+    @Volatile private var openSeen = false
 
     @Volatile private var peak = 0
 
@@ -263,6 +281,7 @@ class Recorder(private val rate: Int, private val onChunk: (ByteArray) -> Unit) 
     private fun loop(r: AudioRecord, n: Int) {
         Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
         val buf = ByteArray(n)
+        val out = save?.outputStream()?.buffered()
         while (running) {
             var off = 0
             while (off < n && running) {
@@ -275,29 +294,48 @@ class Recorder(private val rate: Int, private val onChunk: (ByteArray) -> Unit) 
                 off += got
             }
             if (off < n) break
-            measure(buf)
+            if (measure(buf)) soundChunks++
+            if (chunks % 10 == 0) checkSilenced(r)
             chunks++
+            out?.write(buf)
             onChunk(buf.copyOf())
         }
+        out?.close()
     }
 
-    private fun measure(buf: ByteArray) {
+    /** True when the chunk has any sound in it. */
+    private fun measure(buf: ByteArray): Boolean {
         var sum = 0.0
-        var p = peak
+        var chunkPeak = 0
         for (i in 0 until buf.size / 2) {
             val s = (buf[2 * i].toInt() and 0xff) or (buf[2 * i + 1].toInt() shl 8)
-            p = max(p, abs(s))
+            chunkPeak = max(chunkPeak, abs(s))
             sum += s.toDouble() * s
         }
-        peak = p
+        peak = max(peak, chunkPeak)
         val rms = sqrt(sum / (buf.size / 2)) / 32768.0
         if (rms > 0) loudestDb = max(loudestDb, 20 * log10(rms))
+        return chunkPeak > 0
+    }
+
+    /** Android's own answer to "is this app's microphone muted by the system?" (API 29+). */
+    private fun checkSilenced(r: AudioRecord) {
+        val silenced = r.activeRecordingConfiguration?.isClientSilenced ?: return
+        if (silenced) silencedSeen = true else openSeen = true
+    }
+
+    private fun androidSays(): String = when {
+        silencedSeen && openSeen -> "Android silenced it part of the time"
+        silencedSeen -> "Android says it silenced this app"
+        openSeen -> "Android says it did not silence this app"
+        else -> "Android didn't say whether it silenced this app"
     }
 
     fun report(): String = when {
         chunks == 0 -> "no audio arrived"
-        peak == 0 -> "SILENT: $chunks chunks, every sample is zero (Android is muting the mic for this app, or the mic is muted)"
-        else -> "audio OK: $chunks chunks, peak $peak, loudest ${"%.0f".format(loudestDb)} dBFS"
+        peak == 0 -> "SILENT: $chunks chunks, every sample is zero; ${androidSays()}"
+        else -> "audio OK: $chunks chunks, $soundChunks with sound, peak $peak, " +
+            "loudest ${"%.0f".format(loudestDb)} dBFS; ${androidSays()}"
     }
 
     fun stop() {

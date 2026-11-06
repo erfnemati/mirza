@@ -90,6 +90,13 @@ object Prefs {
         get() = sp.getBoolean("log_text", false)
         set(v) = sp.edit().putBoolean("log_text", v).apply()
 
+    /**
+     * Keep the last recording in the app's files (last-recording.pcm, 16-bit mono). No switch on
+     * screen: set "save_audio" in the prefs with adb, to check what the microphone really gave.
+     */
+    val saveAudio: Boolean
+        get() = sp.getBoolean("save_audio", false)
+
     /** The user wants the bubble shown. */
     var bubbleOn: Boolean
         get() = sp.getBoolean("bubble_on", false)
