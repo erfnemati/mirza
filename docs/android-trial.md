@@ -16,7 +16,9 @@ size, logo or gestures, no AI revision, no tasks, a plain settings screen.
   `examples/dictate.rs` feeds an audio file through `Dictation` the way the app does.
 - `crates/core`: three cfg lines, so it compiles for Android (no cpal, no sound player there).
 - `android/`: the Gradle project (Gradle 9.8.2 wrapper, AGP 9.5.1 with built-in Kotlin, JNA
-  5.19.1, compileSdk/targetSdk 36, minSdk 29). `android/build-rust.sh` runs before every build:
+  5.19.1, compileSdk/targetSdk 36, minSdk 29). Since step 5 the trial is the `:trial` module
+  (`android/trial`), next to the real app (`:app`); both get the Rust core from `:core`
+  (`android/core`). `android/build-rust.sh` runs before every build:
   cargo-ndk builds `libmirza_mobile.so` for arm64-v8a and x86_64, and the Kotlin bindings are
   generated from an unstripped host build (the stripped release `.so` has no UniFFI metadata left).
 - Application id `dev.erfnemati.mirza.trial`; the real app will be `dev.erfnemati.mirza`.
@@ -28,8 +30,8 @@ JDK 17+, and the Android SDK with an NDK (r30 used here), with `ANDROID_HOME` se
 
 ```sh
 cd android
-./gradlew assembleDebug          # app/build/outputs/apk/debug/app-debug.apk
-./gradlew assembleDebug -Pmirza.abis=arm64-v8a -Pmirza.rustProfile=dev   # faster while working
+./gradlew :trial:assembleDebug   # trial/build/outputs/apk/debug/trial-debug.apk
+./gradlew :trial:assembleDebug -Pmirza.abis=arm64-v8a -Pmirza.rustProfile=dev   # faster while working
 ```
 
 Behind a proxy, pass it to Gradle: `-Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=10808`.
