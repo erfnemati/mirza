@@ -184,6 +184,31 @@ Android 13 shows an older dialog ("Restricted setting"), and HyperOS may add its
 checklist asks for the exact wording. An app installed from Google Play is not restricted. adb
 installs are not restricted either, so tests that use `adb install` never show this.
 
+### First results on Erfan's phone
+
+Xiaomi with HyperOS 1.0 on Android 13, 2026-11-06. This is a first run, not yet the whole checklist.
+
+- Installing from the phone's browser was stopped by Google Play Protect: "App blocked to protect
+  your device". Play Protect blocks apps from outside the Play Store that declare one of four
+  sensitive permissions, and an accessibility service is one of them; SMS and notification access
+  are the others. It installed once "Scan apps with Play Protect" was turned off in the Play Store
+  for the install. Anyone who installs a sideloaded Mirza APK will hit this before restricted
+  settings. adb installs are not blocked.
+- In Accessibility the service was blocked with Android 13's wording: "Restricted setting: For
+  your security, this setting is currently unavailable". "Allow restricted settings" in App info
+  unlocked it.
+- Dictation worked in Telegram (Saved Messages) and WhatsApp: tap, the bubble turns red, speak, tap
+  again and it turns back. But in an empty field, the first piece came out with "Message" in front
+  ("Message1,2,3"). Both apps report their hint, "Message", as the text of an empty field without
+  marking it as a hint. An empty Android field reports no cursor (seen on the emulator as "cursor
+  -1..-1"), so build trial2 (`0.1.5-trial2`) pastes when a field has text but no cursor, and logs
+  the field's length, hint state and cursor before each piece. It still has to be checked on the
+  phone.
+- With the overlay bubble, Android shows its own "Mirza trial is displaying over other apps"
+  notification ("If you don't want Mirza trial to use this feature, tap to open settings and turn
+  it off"), and the app shows "Bubble on". On the emulator, the accessibility bubble with mode B
+  showed neither while idle, only the microphone notification while recording.
+
 ## What it means for the Android app (step 5)
 
 - Draw the bubble from the accessibility service (`TYPE_ACCESSIBILITY_OVERLAY`). Besides the
@@ -196,7 +221,11 @@ installs are not restricted either, so tests that use `adb install` never show t
 - Without the accessibility service, offer the overlay bubble with a foreground service (A or B) as
   a fallback; the text can then only go to the clipboard.
 - The setup screen has to walk the user through restricted settings for a sideloaded APK; it is
-  the step most people will get stuck on.
+  the step most people will get stuck on. Before that, the install guide has to cover Play
+  Protect's block. A Mirza keyboard (IME) would avoid both, since a keyboard is not on Play
+  Protect's list; it is untested and changes how dictation starts.
+- Don't trust a field's text blindly: some apps report their hint as text. Use the cursor (no
+  cursor means the field is empty or unknown) and paste when in doubt.
 - Keep audio while connecting instead of dropping it after 10 seconds, and give phone-specific
   error wording.
 
