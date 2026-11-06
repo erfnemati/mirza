@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -73,8 +74,14 @@ object BubbleControl {
  */
 class MainActivity : Activity() {
     private lateinit var status: TextView
+    private lateinit var fixTyping: Button
     private lateinit var log: TextView
-    private val refreshLog = Runnable { log.text = TrialLog.text() }
+
+    // The typing service logs when it connects, so the status follows the log.
+    private val refreshLog = Runnable {
+        log.text = TrialLog.text()
+        refreshStatus()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -96,19 +103,24 @@ class MainActivity : Activity() {
         status = TextView(this).apply { setTextIsSelectable(true) }
         root.addView(heading("Status"))
         root.addView(status)
+        fixTyping = button("") { openTypingSettings() }
+        root.addView(fixTyping)
 
         root.addView(heading("Set up"))
         root.addView(button("1. Allow microphone and notifications") { askPermissions() })
         root.addView(button("2. Allow drawing over other apps") {
             open(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
         })
-        root.addView(button("3. Turn on \"Mirza trial typing\" in Accessibility") {
-            open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-        })
-        root.addView(button("App info (⋮ > Allow restricted settings)") {
+        root.addView(button("3. Turn on \"Mirza trial typing\" in Accessibility") { openTypingSettings() })
+        val xiaomi = Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true)
+        val battery = if (xiaomi) "; Battery saver > No restrictions" else ""
+        root.addView(button("App info (⋮ > Allow restricted settings$battery)") {
             open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
         })
-        if (Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true)) {
+        if (xiaomi) {
+            root.addView(button("Xiaomi: Autostart (lets Android restart typing)") {
+                open(Intent().setClassName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"))
+            })
             root.addView(button("Xiaomi: other permissions (pop-up windows in background)") {
                 open(
                     Intent("miui.intent.action.APP_PERM_EDITOR")
@@ -197,10 +209,35 @@ class MainActivity : Activity() {
             appendLine("Microphone allowed: ${yes(mic)}")
             appendLine("Notifications allowed: ${yes(notes)}")
             appendLine("Drawing over other apps allowed: ${yes(Settings.canDrawOverlays(this@MainActivity))}")
-            appendLine("Typing service on: ${yes(TypingService.instance != null)}")
+            appendLine("Typing service running: ${yes(TypingService.instance != null)}")
             appendLine("Soniox key set: ${yes(Prefs.apiKey.isNotEmpty())}")
             append("Bubble: ${if (Prefs.bubbleOn) "shown" else "hidden"}")
         }
+        val fix = typingFix()
+        fixTyping.visibility = if (fix == null) View.GONE else View.VISIBLE
+        if (fix != null) fixTyping.text = fix
+    }
+
+    /** The typing service's state, and a button to fix it when it isn't running. */
+    private fun typingFix(): String? = when {
+        TypingService.instance != null -> null
+        TypingService.enabledInSettings(this) ->
+            "Typing is on in Accessibility but not running: turn \"Mirza trial typing\" off and on there"
+        else -> "Typing is off (closing the app from recents can do that): turn on \"Mirza trial typing\""
+    }
+
+    /**
+     * The accessibility settings, with Mirza marked where the phone supports that. Mirza's own page
+     * there (ACCESSIBILITY_DETAILS_SETTINGS) needs a system permission, so apps can't open it.
+     */
+    private fun openTypingSettings() {
+        val name = ComponentName(this, TypingService::class.java).flattenToString()
+        val highlight = Bundle().apply { putString(":settings:fragment_args_key", name) }
+        open(
+            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                .putExtra(":settings:fragment_args_key", name)
+                .putExtra(":settings:show_fragment_args", highlight),
+        )
     }
 
     private fun askPermissions() {

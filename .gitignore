@@ -3,3 +3,4 @@ node_modules/
 /dist
 *.AppImage
 crates/panel/gen/
+/.secrets/
