@@ -33,10 +33,10 @@ impl Effort {
         }
     }
 
-    /// Whether the model may spend real time thinking, so its answer needs
-    /// room for that.
+    /// Whether the model may spend real time thinking (many do by default),
+    /// so its answer needs room for that.
     pub(crate) fn thinks(self) -> bool {
-        matches!(self, Effort::Low | Effort::Medium | Effort::High)
+        !matches!(self, Effort::Off | Effort::Minimal)
     }
 }
 
@@ -66,15 +66,15 @@ pub struct AiProviders {
 }
 
 /// Fast, cheap models that clean up text well. Checked on 2026-11-06.
+/// Thinking is left to each model: some refuse to turn it off (Claude Sonnet
+/// 5.5 and Opus 5.5), and some Gemini models refuse "minimal".
 impl Default for AiProviders {
     fn default() -> Self {
         Self {
-            openai: AiProvider::new("gpt-6-luna", Effort::Off),
-            // Flash-Lite already thinks at its lowest level by default, and some
-            // other Gemini models refuse "minimal".
+            openai: AiProvider::new("gpt-6-luna", Effort::Default),
             gemini: AiProvider::new("gemini-3.5-flash-lite", Effort::Default),
-            claude: AiProvider::new("claude-haiku-5-5", Effort::Off),
-            openrouter: AiProvider::new("openai/gpt-6-luna", Effort::Off),
+            claude: AiProvider::new("claude-haiku-5-5", Effort::Default),
+            openrouter: AiProvider::new("openai/gpt-6-luna", Effort::Default),
             local: AiProvider {
                 model: String::new(),
                 base_url: Kind::Local.default_base_url().into(),

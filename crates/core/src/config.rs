@@ -516,21 +516,19 @@ pub const TEMPLATE: &str = r#"# Mirza settings. Every key is optional; the value
 # instructions = ""               # your own rules, e.g. "Use British spelling."
 
 # Each AI provider's model; base_url "" means the provider's own address.
-# effort: default, none, minimal, low, medium or high (how much it may think).
+# effort: default (the model's own), none, minimal, low, medium or high: how much
+# it may think first. Some models refuse none or minimal.
 # [ai.openai]
 # model = "gpt-6-luna"
-# effort = "none"
 #
 # [ai.gemini]
 # model = "gemini-3.5-flash-lite"
 #
 # [ai.claude]
 # model = "claude-haiku-5-5"
-# effort = "none"
 #
 # [ai.openrouter]
 # model = "openai/gpt-6-luna"
-# effort = "none"
 #
 # [ai.local]                      # an OpenAI-compatible server (vLLM, Ollama, LM Studio)
 # base_url = "http://localhost:8000/v1"

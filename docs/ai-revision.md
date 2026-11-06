@@ -127,9 +127,10 @@ server is on a public address or a domain like `ai.example.com`, it goes through
 ## Other settings
 
 - **Thinking** (under More options): how much a reasoning model may think before answering.
-  It is off by default for OpenAI, Claude and OpenRouter, because it adds seconds and rarely
-  helps with cleanup; Gemini and local servers use the model's own default. If a model rejects
-  the setting, choose **The model's default**.
+  By default each model does what it does on its own, because some models refuse to turn
+  thinking off (Claude Sonnet 5.5 and Opus 5.5, for example). **None** is the fastest where a
+  model allows it. If a model rejects the setting, Mirza says so; choose **The model's
+  default**.
 - **Time limit**: how long to wait for the AI, 15 seconds by default. Longer dictations get a
   second more for every 30 words over 100. When the time is up, the unrevised text is typed.
 - **Your own rules**: anything else you want, in plain words, for example "Use British
@@ -154,7 +155,8 @@ revision", followed by the reason. The common ones:
 - **Doesn't have the chosen model**: pick another model from the list.
 - **Isn't offered in your country**: set a proxy in a country the provider serves.
 - **Took too long to answer**: raise the time limit, choose a faster model, or set Thinking to
-  None.
+  None if the model allows it.
+- **Doesn't take that Thinking setting**: set Thinking to The model's default.
 - **The answer didn't look like your text**: the model answered your words instead of cleaning
   them, or translated them. Try another model.
 - **Couldn't reach your local AI server**: check that the server is running and the address is

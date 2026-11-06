@@ -23,7 +23,10 @@ pub(super) fn build(kind: Kind, base: &str, key: Option<&str>, model: &str, effo
             {"role": "user", "content": req.user},
         ],
     });
-    let max = budget(req.max_tokens, effort);
+    // A local server's context is often small and its models rarely think
+    // unless asked, so only a level chosen in the settings adds room there.
+    let max =
+        if kind == Kind::Local && effort == Effort::Default { req.max_tokens } else { budget(req.max_tokens, effort) };
     match kind {
         // OpenAI's reasoning models refuse the older max_tokens.
         Kind::OpenAi => body["max_completion_tokens"] = json!(max),

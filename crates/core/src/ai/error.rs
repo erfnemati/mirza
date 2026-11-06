@@ -164,6 +164,11 @@ pub(super) fn from_status(status: u16, msg: &str) -> ErrorKind {
 pub(super) fn from_answer(status: u16, body: &str) -> (ErrorKind, String) {
     let msg = super::error_message(body);
     let kind = from_status(status, &msg);
+    // Some models refuse to turn thinking off, or a level they don't have.
+    let lower = msg.to_lowercase();
+    if kind == ErrorKind::BadRequest && (lower.contains("thinking") || lower.contains("reasoning")) {
+        return (kind, "this model doesn't take that Thinking setting; set Thinking to \"The model's default\"".into());
+    }
     let detail = if msg.is_empty() { format!("HTTP {status}") } else { shorten(&msg, 200) };
     (kind, detail)
 }
@@ -186,6 +191,15 @@ mod tests {
         assert_eq!(from_status(404, ""), ErrorKind::ModelNotFound);
         assert_eq!(from_status(529, "Overloaded"), ErrorKind::ServerError);
         assert_eq!(from_status(400, "max_tokens: too large"), ErrorKind::BadRequest);
+    }
+
+    #[test]
+    fn thinking_settings_a_model_refuses() {
+        let claude = r#"{"type":"error","error":{"type":"invalid_request_error","message":"\"thinking.type.disabled\" is not supported for this model. Use \"thinking.type.between_tools\" for the lowest thinking setting."}}"#;
+        let (kind, detail) = from_answer(400, claude);
+        assert_eq!(kind, ErrorKind::BadRequest);
+        let msg = AiError::new(kind, Kind::Claude, detail, true).to_string();
+        assert!(msg.starts_with("Claude rejected the request (this model doesn't take that Thinking setting; set Thinking to \"The model's default\")"), "{msg}");
     }
 
     #[test]
