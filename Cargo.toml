@@ -1,9 +1,9 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/hotkey", "crates/inject", "crates/daemon", "crates/panel"]
+members = ["crates/core", "crates/hotkey", "crates/inject", "crates/daemon", "crates/panel", "crates/mobile"]
 # The settings window needs the WebKitGTK development files on Linux; build it
 # with `cargo build -p mirza-panel`.
-default-members = ["crates/core", "crates/hotkey", "crates/inject", "crates/daemon"]
+default-members = ["crates/core", "crates/hotkey", "crates/inject", "crates/daemon", "crates/mobile"]
 
 [workspace.package]
 version = "0.1.5"

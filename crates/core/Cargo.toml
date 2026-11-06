@@ -26,7 +26,8 @@ url = "2.5.8"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-[target.'cfg(not(target_os = "linux"))'.dependencies]
+# Android records in the app (Kotlin) and passes the audio in.
+[target.'cfg(not(any(target_os = "linux", target_os = "android")))'.dependencies]
 cpal = "0.18.2"
 
 [target.'cfg(windows)'.dependencies]

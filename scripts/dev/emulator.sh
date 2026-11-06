@@ -1,9 +1,10 @@
 #!/bin/sh
-# The Android emulator on the dev server, which has no display and no KVM.
-# It runs on a virtual screen (Xvfb) because the headless build has no audio,
-# and with software CPU emulation, which is slow: every start is a cold boot of
-# 10 to 30 minutes. Snapshots are off because a saved one fails to load here
-# ("Length mismatch" on a RAM block), so keep it running while you test.
+# The Android emulator on the dev server, which has no display.
+# It runs on a virtual screen (Xvfb) because the headless build has no audio.
+# With KVM (/dev/kvm, nested virtualization on the VM) a cold boot takes about
+# 2 minutes. Without it, it falls back to software CPU emulation: 7 to 30 minutes,
+# and its microphone goes silent after a second. Snapshots are off: without KVM
+# a saved one fails to load ("Length mismatch" on a RAM block), and /home is small.
 # Its microphone is the default PulseAudio source: run scripts/dev/virtual-mic.sh start first.
 #
 #   scripts/dev/emulator.sh start        boot in the background
@@ -26,10 +27,20 @@ start)
   if ! "$SDK/emulator/emulator" -list-avds | grep -qx "$AVD"; then
     echo no | "$SDK/cmdline-tools/latest/bin/avdmanager" create avd -n "$AVD" -k "$IMAGE" -d pixel_6 >/dev/null
   fi
+  if [ -w /dev/kvm ]; then
+    accel="-accel on -memory 3072"
+  elif [ -e /dev/kvm ] && id -nG "$(id -un)" | grep -qw kvm; then
+    # In the kvm group, but this shell started before joining it: run again with the group.
+    exec sg kvm -c "\"$0\" start"
+  else
+    # Software emulation runs every virtual CPU on one host thread: more cores only add load.
+    accel="-accel off -cores 2 -memory 3072"
+  fi
   "$ADB" start-server >/dev/null 2>&1
+  # $accel is split into words on purpose.
   PULSE_SERVER="unix:${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pulse/native" \
     nohup nice -n 15 xvfb-run -a -s "-screen 0 1280x1024x24" "$SDK/emulator/emulator" -avd "$AVD" \
-    -port "$PORT" -no-boot-anim -no-metrics -gpu swiftshader_indirect -accel off -allow-host-audio -no-snapshot \
+    -port "$PORT" -no-boot-anim -no-metrics -gpu swiftshader_indirect $accel -allow-host-audio -no-snapshot \
     >"$LOG" 2>&1 &
   echo "starting $AVD as $DEV (log: $LOG)"
   ;;

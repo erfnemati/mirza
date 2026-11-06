@@ -152,6 +152,10 @@ fn play_wav(_sound: Sound, _volume: u8, wav: Vec<u8>) {
     unsafe { PlaySoundW(current.as_ptr().cast(), std::ptr::null_mut(), SND_MEMORY | SND_ASYNC | SND_NODEFAULT) };
 }
 
+/// Elsewhere (Android) the app plays its own sounds.
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+fn play_wav(_sound: Sound, _volume: u8, _wav: Vec<u8>) {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
