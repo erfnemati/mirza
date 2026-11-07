@@ -2,8 +2,12 @@
 
 use std::collections::HashMap;
 
+use futures_util::StreamExt;
+use tokio::sync::mpsc;
 use zbus::Connection;
 use zbus::zvariant::Value;
+
+use crate::daemon::Msg;
 
 pub struct Notifier {
     conn: Connection,
@@ -27,18 +31,25 @@ impl Notifier {
             hints.insert("transient", Value::Bool(true));
         }
         let timeout: i32 = if urgent { -1 } else { 2500 };
-        self.send(summary, body, hints, timeout, replaces).await
+        self.send(summary, body, &[], hints, timeout, replaces).await
     }
 
     /// An ordinary notification that stays in the history.
     pub async fn announce(&self, summary: &str, body: &str) {
-        self.send(summary, body, HashMap::new(), -1, 0).await;
+        self.send(summary, body, &[], HashMap::new(), -1, 0).await;
+    }
+
+    /// A voice task's notification, with Undo and Edit buttons. It stays in
+    /// the history, so the buttons can be used a little later.
+    pub async fn show_task(&self, summary: &str, body: &str, replaces: u32) -> u32 {
+        self.send(summary, body, &["undo", "Undo", "edit", "Edit"], HashMap::new(), 10_000, replaces).await
     }
 
     async fn send(
         &self,
         summary: &str,
         body: &str,
+        actions: &[&str],
         mut hints: HashMap<&str, Value<'_>>,
         timeout: i32,
         replaces: u32,
@@ -51,7 +62,7 @@ impl Notifier {
                 "/org/freedesktop/Notifications",
                 Some("org.freedesktop.Notifications"),
                 "Notify",
-                &("Mirza", replaces, self.icon.as_str(), summary, body, Vec::<&str>::new(), hints, timeout),
+                &("Mirza", replaces, self.icon.as_str(), summary, body, actions, hints, timeout),
             )
             .await;
         match reply {
@@ -61,6 +72,34 @@ impl Notifier {
                 0
             }
         }
+    }
+
+    /// Passes clicks on notification buttons to the daemon as
+    /// `Msg::NoteAction`, until the daemon stops.
+    pub async fn listen(&self, tx: mpsc::UnboundedSender<Msg>) {
+        let rule = zbus::MatchRule::builder()
+            .msg_type(zbus::message::Type::Signal)
+            .interface("org.freedesktop.Notifications")
+            .and_then(|r| r.member("ActionInvoked"))
+            .map(|r| r.build());
+        let stream = match rule {
+            Ok(rule) => zbus::MessageStream::for_match_rule(rule, &self.conn, None).await,
+            Err(e) => Err(e),
+        };
+        let mut stream = match stream {
+            Ok(s) => s,
+            Err(e) => return tracing::warn!("notification buttons won't work: {e}"),
+        };
+        tokio::spawn(async move {
+            while let Some(msg) = stream.next().await {
+                let Ok(msg) = msg else { continue };
+                if let Ok((id, action)) = msg.body().deserialize::<(u32, String)>()
+                    && tx.send(Msg::NoteAction(id, action)).is_err()
+                {
+                    return;
+                }
+            }
+        });
     }
 
     pub async fn close(&self, id: u32) {

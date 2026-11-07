@@ -15,7 +15,7 @@ pub mod revise;
 mod settings;
 
 #[cfg(test)]
-mod mock;
+pub(crate) mod mock;
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -322,7 +322,7 @@ fn error_message(body: &str) -> String {
     shorten(msg.trim(), 200)
 }
 
-fn shorten(s: &str, max: usize) -> String {
+pub(crate) fn shorten(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         return s.to_owned();
     }

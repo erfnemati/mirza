@@ -48,6 +48,8 @@ pub struct Config {
     pub revision: crate::ai::Revision,
     /// AI providers: model, address and thinking effort for each.
     pub ai: crate::ai::AiProviders,
+    /// Voice tasks: what you say becomes a Google Tasks entry.
+    pub tasks: crate::tasks::TaskSettings,
     /// Prepaid credit per provider, so the app can show what is left: amount
     /// minus spend since the date.
     pub credit: BTreeMap<String, Credit>,
@@ -74,6 +76,7 @@ impl Default for Config {
             providers: Providers::default(),
             revision: crate::ai::Revision::default(),
             ai: crate::ai::AiProviders::default(),
+            tasks: crate::tasks::TaskSettings::default(),
             credit: BTreeMap::new(),
         }
     }
@@ -88,6 +91,8 @@ pub enum Action {
     Cancel,
     Panel,
     NextProvider,
+    /// Say a task; it goes to Google Tasks (see `tasks`).
+    Task,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -117,6 +122,7 @@ impl Shortcut {
         match self.action {
             Action::Dictate => format!("dictate-{}", if self.mode == Mode::Hold { "hold" } else { "toggle" }),
             Action::Revise => format!("revise-{}", if self.mode == Mode::Hold { "hold" } else { "toggle" }),
+            Action::Task => format!("task-{}", if self.mode == Mode::Hold { "hold" } else { "toggle" }),
             Action::Cancel => "cancel".into(),
             Action::Panel => "panel".into(),
             Action::NextProvider => "next-provider".into(),
@@ -129,6 +135,8 @@ impl Shortcut {
             (Action::Dictate, Mode::Hold) => "Dictate while held",
             (Action::Revise, Mode::Toggle) => "Start or stop dictation, revised with AI",
             (Action::Revise, Mode::Hold) => "Dictate while held, revised with AI",
+            (Action::Task, Mode::Toggle) => "Start or stop saying a task",
+            (Action::Task, Mode::Hold) => "Say a task while held",
             (Action::Cancel, _) => "Cancel dictation",
             (Action::Panel, _) => "Open Mirza settings",
             (Action::NextProvider, _) => "Switch to the next speech-to-text provider",
@@ -435,7 +443,7 @@ pub fn set_shortcuts(doc: &mut toml_edit::DocumentMut, list: &[Shortcut]) {
             serde_json::to_value(sc.action).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default();
         t["action"] = toml_edit::value(action);
         t["keys"] = toml_edit::value(sc.keys.as_str());
-        if matches!(sc.action, Action::Dictate | Action::Revise) {
+        if matches!(sc.action, Action::Dictate | Action::Revise | Action::Task) {
             t["mode"] = toml_edit::value(if sc.mode == Mode::Hold { "hold" } else { "toggle" });
         }
         arr.push(t);
@@ -469,7 +477,7 @@ pub const TEMPLATE: &str = r#"# Mirza settings. Every key is optional; the value
 # Global shortcuts; `mode` is "toggle" or "hold". Without this section the
 # defaults are Ctrl+Alt+H (start/stop) and Ctrl+Alt+J (hold to talk).
 # [[shortcuts]]
-# action = "dictate"              # dictate, revise, cancel, panel or next_provider
+# action = "dictate"              # dictate, revise, task, cancel, panel or next_provider
 # keys = "Ctrl+Alt+H"
 # mode = "toggle"
 #
@@ -533,6 +541,19 @@ pub const TEMPLATE: &str = r#"# Mirza settings. Every key is optional; the value
 # [ai.local]                      # an OpenAI-compatible server (vLLM, Ollama, LM Studio)
 # base_url = "http://localhost:8000/v1"
 # model = ""                      # empty: the first model the server lists
+
+# Voice tasks (the "task" shortcut): what you say becomes a Google Tasks
+# entry, and also a Google Calendar event when you say a clock time.
+# [tasks]
+# provider = ""                   # AI to use: "" (the one AI revision uses), openai, gemini, claude, openrouter or local
+# timeout_sec = 30                # then the task is saved as said
+# google_client_id = ""           # your own Google OAuth client ("" for the one built into Mirza, if any)
+# default_list = ""               # Google Tasks list id for tasks that fit no list ("" for your default list)
+# event_minutes = 30              # event length when you don't say one
+# timed_due_date = true           # a task with a time also gets that day as its due date
+#
+# [tasks.list_hints]              # other names for a list, by list id (easier in the settings window)
+# "MDE2NjQ..." = "office, Acme"
 
 # [credit.soniox]                 # prepaid credit, to show what is left
 # amount = 20.0

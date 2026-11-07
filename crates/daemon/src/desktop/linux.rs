@@ -44,6 +44,7 @@ impl Desktop {
             Ok(active) => self.kwin = Some(active),
             Err(e) => tracing::info!("not watching the active window: {e}"),
         }
+        self.notifier.listen(self.tx.clone()).await;
         let t = MirzaTray { tx: self.tx.clone(), view };
         match t.spawn().await {
             Ok(h) => self.tray = Some(h),
@@ -81,6 +82,11 @@ impl Desktop {
 
     pub async fn notify(&self, summary: &str, body: &str, urgent: bool, replaces: u32) -> u32 {
         self.notifier.show(summary, body, urgent, replaces).await
+    }
+
+    /// A voice task's notification, with Undo and Edit buttons.
+    pub async fn notify_task(&self, summary: &str, body: &str, _task: &str, replaces: u32) -> u32 {
+        self.notifier.show_task(summary, body, replaces).await
     }
 
     /// A message worth keeping, like a new release: it stays in the
