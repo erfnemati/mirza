@@ -18,6 +18,8 @@ class MirzaApp : Application() {
         super.onCreate()
         app = this
         Core.init(this)
+        History.load()
+        Core.listeners.add { History.trim() }
         Notes.createChannels(this)
         AppLog.add(
             "started: Mirza ${BuildConfig.VERSION_NAME}, core ${dev.erfnemati.mirza.core.coreVersion()}, " +

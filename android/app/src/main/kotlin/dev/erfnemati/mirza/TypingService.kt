@@ -5,9 +5,11 @@ import android.app.KeyguardManager
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -49,8 +51,25 @@ class TypingService : AccessibilityService() {
 
     private var lastEditable: AccessibilityNodeInfo? = null
     private var bubble: Bubble? = null
+    /** The lock screen (or a dark screen) is in front, as the screen broadcasts tell it. */
+    private var lockedNow = false
     private val main = Handler(Looper.getMainLooper())
     private val onSettings: (Settings) -> Unit = { updateBubble(it) }
+
+    /**
+     * Hides the bubble on the lock screen when the setting says so. "User present" comes while the
+     * keyguard still says locked, so it counts as unlocked by itself.
+     */
+    private val screen = object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context, i: Intent) {
+            lockedNow = when (i.action) {
+                Intent.ACTION_SCREEN_OFF -> true
+                Intent.ACTION_USER_PRESENT -> false
+                else -> locked()
+            }
+            updateBubble(Core.settings)
+        }
+    }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -59,6 +78,15 @@ class TypingService : AccessibilityService() {
         AppLog.add("typing service connected")
         Sounds.warmUp()
         Core.listeners.add(onSettings)
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_USER_PRESENT)
+        }
+        // Exported: "user present" comes from the system UI app, which a not-exported receiver
+        // never hears. Only the system can send these three, so nothing else can reach it.
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(screen, filter, RECEIVER_EXPORTED) else registerReceiver(screen, filter)
+        lockedNow = locked()
         updateBubble(Core.settings)
     }
 
@@ -76,6 +104,7 @@ class TypingService : AccessibilityService() {
 
     override fun onUnbind(intent: Intent?): Boolean {
         Core.listeners.remove(onSettings)
+        runCatching { unregisterReceiver(screen) }
         bubble?.hide()
         bubble = null
         instance = null
@@ -85,13 +114,29 @@ class TypingService : AccessibilityService() {
         return super.onUnbind(intent)
     }
 
+    private var look: BubbleSettings? = null
+
+    /** Shows, hides or redraws the bubble after a setting changed or the phone locked or unlocked. */
     private fun updateBubble(s: Settings) {
-        if (s.bubbleShow && bubble == null) {
-            bubble = Bubble(this).takeIf { it.show() }
-        } else if (!s.bubbleShow) {
+        val b = s.bubble
+        val want = b.show && (b.lockScreen || !lockedNow)
+        val same = look?.let { it.size == b.size && it.logo == b.logo } == true
+        if (bubble != null && (!want || !same)) {
             bubble?.hide()
             bubble = null
         }
+        if (want && bubble == null) {
+            bubble = Bubble(this, b).takeIf { it.show() }
+            look = b
+        }
+        bubble?.setOpacity(b.opacity)
+    }
+
+    /** Draws the bubble again, e.g. at its first place after "Move it back". */
+    fun redrawBubble() {
+        bubble?.hide()
+        bubble = null
+        updateBubble(Core.settings)
     }
 
     /** The phone is locked: Mirza never types or acts there. */

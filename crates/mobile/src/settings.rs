@@ -1,14 +1,15 @@
 //! The phone app's settings and API keys, kept in the app's private files.
 //!
 //! Settings are TOML, like the desktop's, but only with what a phone needs; the parts both share
-//! (speech providers, later AI revision) use the desktop's types. Kotlin reads them all as JSON
+//! (speech providers, AI revision, prepaid credit) use the desktop's types. Kotlin reads them all as JSON
 //! and changes one value at a time by its dotted path. Keys live in a separate file and never go
 //! back to Kotlin; it only asks whether one is set.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use mirza_core::config::{PROVIDERS, Providers, provider_name, set_json, write_private};
+use mirza_core::ai::{AiProviders, Kind, Revision};
+use mirza_core::config::{Credit, PROVIDERS, Providers, provider_name, set_json, write_private};
 use serde::{Deserialize, Serialize};
 
 use crate::MobileError;
@@ -29,10 +30,22 @@ pub struct MobileConfig {
     pub proxy: String,
     /// A short sound when dictation starts and stops.
     pub sounds: bool,
+    /// 1 to 100.
+    pub sound_volume: u8,
     /// Once a day, ask GitHub whether a newer version of Mirza is out.
     pub check_updates: bool,
+    /// How many recent texts the app keeps (0: none).
+    pub history_size: usize,
+    pub typing: Typing,
     pub bubble: Bubble,
+    pub gestures: Gestures,
     pub providers: Providers,
+    /// AI revision: which provider, how much to change, the rules.
+    pub revision: Revision,
+    /// AI providers: model, address and thinking effort for each.
+    pub ai: AiProviders,
+    /// Prepaid credit per provider, so the app can show what is left.
+    pub credit: BTreeMap<String, Credit>,
 }
 
 impl Default for MobileConfig {
@@ -43,23 +56,81 @@ impl Default for MobileConfig {
             max_session_sec: 900,
             proxy: String::new(),
             sounds: true,
+            sound_volume: 50,
             check_updates: true,
+            history_size: 20,
+            typing: Typing::default(),
             bubble: Bubble::default(),
+            gestures: Gestures::default(),
             providers: Providers::default(),
+            revision: Revision::default(),
+            ai: AiProviders::default(),
+            credit: BTreeMap::new(),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
+pub struct Typing {
+    /// Arabic ي and ك become Persian ی and ک.
+    pub persian_letters: bool,
+    /// Also put each dictation in the clipboard.
+    pub keep_on_clipboard: bool,
+}
+
+impl Default for Typing {
+    fn default() -> Self {
+        Self { persian_letters: true, keep_on_clipboard: false }
+    }
+}
+
+/// The floating button.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct Bubble {
     /// Show the floating button while typing is on.
     pub show: bool,
+    /// Diameter in dp, 40 to 88.
+    pub size: u32,
+    /// How opaque it is while idle, 30 to 100 percent; it is always solid while recording.
+    pub opacity: u8,
+    /// Mirza's logo; false for a plain round button.
+    pub logo: bool,
+    /// Also on the lock screen (where it never types).
+    pub lock_screen: bool,
 }
 
 impl Default for Bubble {
     fn default() -> Self {
-        Self { show: true }
+        Self { show: true, size: 56, opacity: 100, logo: true, lock_screen: true }
+    }
+}
+
+/// What a gesture on the bubble does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Gesture {
+    /// Start or stop dictation.
+    Dictate,
+    /// Dictation revised by AI before it's typed.
+    Revise,
+    /// Open Mirza's settings.
+    OpenApp,
+    None,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Gestures {
+    pub tap: Gesture,
+    pub double_tap: Gesture,
+    pub long_press: Gesture,
+}
+
+impl Default for Gestures {
+    fn default() -> Self {
+        Self { tap: Gesture::Dictate, double_tap: Gesture::Revise, long_press: Gesture::OpenApp }
     }
 }
 
@@ -76,6 +147,29 @@ impl MobileConfig {
             return Err(format!("unknown speech service {:?}", self.active_provider));
         }
         mirza_core::net::resolve_proxy(&self.proxy).map_err(|e| e.to_string())?;
+        let b = &self.bubble;
+        if !(40..=88).contains(&b.size) {
+            return Err(format!("bubble.size must be 40 to 88, not {}", b.size));
+        }
+        if !(30..=100).contains(&b.opacity) {
+            return Err(format!("bubble.opacity must be 30 to 100, not {}", b.opacity));
+        }
+        if !(1..=100).contains(&self.sound_volume) {
+            return Err(format!("sound_volume must be 1 to 100, not {}", self.sound_volume));
+        }
+        if self.history_size > 200 {
+            return Err("history_size can be at most 200".into());
+        }
+        if self.gestures.tap == Gesture::None {
+            return Err("a tap on the bubble has to do something".into());
+        }
+        let p = self.revision.provider.trim();
+        if !p.is_empty() && Kind::parse(p).is_none() {
+            return Err(format!("unknown AI provider {p:?}"));
+        }
+        if !(1..=120).contains(&self.revision.timeout_sec) {
+            return Err("revision.timeout_sec must be 1 to 120".into());
+        }
         Ok(())
     }
 }
@@ -174,6 +268,11 @@ pub(crate) fn missing_key(service: &str) -> MobileError {
     MobileError::Settings(format!("Enter your {} API key first (Speech settings).", provider_name(service)))
 }
 
+/// The same for an AI provider.
+pub(crate) fn missing_ai_key(kind: Kind) -> String {
+    format!("Enter your {} API key first (AI revision settings).", kind.name())
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -218,6 +317,19 @@ mod tests {
         assert!(store.set("active_provider", &json!("whisper")).is_err());
         assert!(store.set("sonds", &json!(true)).is_err(), "typos are refused");
         assert!(store.set("sounds", &json!("yes")).is_err(), "wrong types are refused");
+        assert!(store.set("bubble.size", &json!(20)).is_err());
+        assert!(store.set("bubble.opacity", &json!(10)).is_err());
+        assert!(store.set("gestures.tap", &json!("none")).is_err());
+        assert!(store.set("gestures.tap", &json!("fly")).is_err());
+        assert!(store.set("revision.provider", &json!("bard")).is_err());
+        let cfg = store.set("gestures.long_press", &json!("revise")).unwrap();
+        assert_eq!(cfg.gestures.long_press, Gesture::Revise);
+        let cfg = store.set("revision.provider", &json!("claude")).unwrap();
+        assert_eq!(cfg.revision.kind(), Some(Kind::Claude));
+        assert_eq!(cfg.ai.claude.model, "claude-haiku-5-5", "the desktop's defaults");
+        store.set("credit.soniox.amount", &json!(20.0)).unwrap();
+        let cfg = store.set("credit.soniox.since", &json!("2026-11-01")).unwrap();
+        assert_eq!((cfg.credit["soniox"].amount, cfg.credit["soniox"].since.as_str()), (20.0, "2026-11-01"));
         assert_eq!(store.load().0.proxy, "socks5://127.0.0.1:10808", "refused changes aren't saved");
 
         let cfg = store.set("providers.soniox.languages", &serde_json::Value::Null).unwrap();

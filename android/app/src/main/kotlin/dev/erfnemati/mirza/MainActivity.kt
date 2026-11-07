@@ -60,7 +60,7 @@ class MainActivity : ComponentActivity(), Actions {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        savedInstanceState?.getString("screen")?.let { screen = Screen.valueOf(it) }
+        savedInstanceState?.getString("screen")?.let { name -> Screen.entries.firstOrNull { it.name == name }?.let { screen = it } }
         Updates.onOpen()
         setContent {
             MirzaTheme {
@@ -97,7 +97,13 @@ class MainActivity : ComponentActivity(), Actions {
                             when (shown) {
                                 Screen.HOME -> HomeScreen(steps, this@MainActivity)
                                 Screen.SPEECH -> SpeechScreen(this@MainActivity)
-                                Screen.GENERAL -> GeneralScreen()
+                                Screen.REVISION -> RevisionScreen(this@MainActivity)
+                                Screen.BUBBLE -> BubbleScreen()
+                                Screen.LISTENING -> ListeningScreen()
+                                Screen.TYPING -> TypingScreen()
+                                Screen.HISTORY -> HistoryScreen()
+                                Screen.USAGE -> UsageScreen(this@MainActivity)
+                                Screen.GENERAL -> GeneralScreen(this@MainActivity)
                                 Screen.ABOUT -> AboutScreen(this@MainActivity)
                             }
                         }
@@ -143,6 +149,12 @@ class MainActivity : ComponentActivity(), Actions {
 
     override fun go(screen: Screen) {
         this.screen = screen
+    }
+
+    override fun notificationSettings() {
+        val i = Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName)
+        if (!start(i)) appInfo()
     }
 
     private fun ask(perm: String) {

@@ -21,16 +21,21 @@ import dev.erfnemati.mirza.core.MobileException
 import dev.erfnemati.mirza.core.SoundKind
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.concurrent.thread
 import kotlin.math.abs
 import kotlin.math.max
 
 /**
  * One dictation at a time: starts the microphone service, records, streams the audio to the
- * speech service through the Rust core, and types what comes back. Text that can't be typed ends
- * up in the clipboard, so nothing is lost. Everything here runs on the main thread.
+ * speech service through the Rust core, and types what comes back. Plain dictation types as the
+ * words settle; revised dictation waits for the end, has the AI revise the whole text, and types
+ * that. Text that can't be typed ends up in the clipboard, so nothing is lost. Everything here
+ * runs on the main thread.
  */
 object Session {
     enum class State { IDLE, STARTING, LISTENING, FINISHING }
+
+    enum class Mode { DICTATE, REVISE }
 
     /** Compose state, so the home screen shows it; the bubble listens through [stateListeners]. */
     var state by mutableStateOf(State.IDLE)
@@ -43,6 +48,16 @@ object Session {
     private var startedAt = 0L
     private var lastSpeech = 0L
     private var warnedSilent = false
+
+    var mode = Mode.DICTATE
+        private set
+
+    /** What the speech service heard in this session. */
+    private val heard = StringBuilder()
+    private var typedAny = false
+
+    /** The revision running, if any; a newer one makes older answers stale. */
+    private var revising = 0
 
     /** MicService has reached micReady, so Session may stop it. */
     private var micStarted = false
@@ -71,15 +86,33 @@ object Session {
         }
     }
 
-    fun toggle() {
+    /** A tap: start in `mode` when idle, else stop (or skip the AI revision while it runs). */
+    fun toggle(mode: Mode = Mode.DICTATE) {
         when (state) {
-            State.IDLE -> start()
+            State.IDLE -> start(mode)
             State.STARTING, State.LISTENING -> stop("tap")
-            State.FINISHING -> cancel("tap while finishing")
+            State.FINISHING -> if (this.mode == Mode.REVISE) skipRevision() else cancel("tap while finishing")
         }
     }
 
-    private fun start() {
+    /** The AI is revising the text: a tap types it as it was said. */
+    val revisingNow: Boolean get() = state == State.FINISHING && mode == Mode.REVISE
+
+    /**
+     * A double tap right after the first tap started a dictation: the same recording, but in
+     * `newMode`. Only while nothing has been typed yet. Returns whether it changed.
+     */
+    fun switchMode(newMode: Mode): Boolean {
+        if (state == State.IDLE || state == State.FINISHING || typedAny) return false
+        if (mode == newMode) return true
+        AppLog.add("switched to ${newMode.name.lowercase()}")
+        mode = newMode
+        // Anything heard while it waited for the AI is typed now.
+        if (newMode == Mode.DICTATE) deliver(heard.toString())
+        return true
+    }
+
+    fun start(mode: Mode) {
         val app = MirzaApp.app
         val svc = TypingService.instance ?: return toast("Typing is off: open Mirza to turn it on.")
         if (svc.locked()) {
@@ -94,6 +127,9 @@ object Session {
         if (!svc.hasField()) return toast("Tap into a text field first.")
         val service = Core.settings.activeProvider
         if (!Core.keySet(service)) return toast("Enter your ${serviceName(service)} API key in Mirza first.")
+        this.mode = mode
+        heard.clear()
+        typedAny = false
         untyped.clear()
         warnedSilent = false
         micStarted = false
@@ -149,7 +185,7 @@ object Session {
         changeState(State.LISTENING)
         Sounds.play(SoundKind.START)
         main.postDelayed(tick, 1000)
-        AppLog.add("listening (${Core.settings.activeProvider})")
+        AppLog.add("listening (${Core.settings.activeProvider}, ${mode.name.lowercase()})")
     }
 
     fun stop(reason: String) {
@@ -178,6 +214,8 @@ object Session {
     fun cancel(reason: String) {
         if (state == State.IDLE) return
         AppLog.add("cancelled ($reason)")
+        revising = 0
+        heard.clear()
         recorder?.stop()
         recorder = null
         dictation?.cancel()
@@ -191,20 +229,63 @@ object Session {
         recorder?.stop()
         recorder = null
         dictation?.cancel()
+        // Revised dictation types nothing until the end: what was heard still goes out.
+        if (mode == Mode.REVISE) deliver(heard.toString().trim())
         done()
     }
 
-    private fun done() {
+    /** The speech service is done: type it all now, or revise it first. */
+    private fun heardAll() {
+        val d = dictation
+        dictation = null
+        d?.close()
+        if (mode != Mode.REVISE || heard.isBlank()) return done()
+        val raw = heard.toString().trim()
+        val id = ++revising
+        AppLog.add("revising ${raw.split(Regex("\\s+")).size} words")
+        thread(name = "mirza-revise") {
+            val r = Core.api.revise(raw)
+            main.post {
+                if (revising != id) return@post
+                revising = 0
+                r.note?.let {
+                    AppLog.add("not revised: $it")
+                    toast("Typed without AI revision: $it")
+                }
+                deliver(r.text)
+                done(text = r.text, raw = if (r.revised) r.raw else "")
+            }
+        }
+    }
+
+    /** A tap while the AI works: type what was said as it is. */
+    private fun skipRevision() {
+        revising = 0
+        dictation?.cancel()
+        AppLog.add("revision skipped")
+        val raw = heard.toString().trim()
+        deliver(raw)
+        done(text = raw, raw = "")
+    }
+
+    /** Ends the session; `text` (or what was heard) goes into the recent texts. */
+    private fun done(text: String = heard.toString().trim(), raw: String = "") {
         main.removeCallbacks(tick)
         dictation?.close()
         dictation = null
+        revising = 0
         val app = MirzaApp.app
         if (micStarted) app.stopService(Intent(app, MicService::class.java))
+        val clipboard = app.getSystemService(ClipboardManager::class.java)
         if (untyped.isNotEmpty()) {
-            app.getSystemService(ClipboardManager::class.java).setPrimaryClip(sensitiveClip(untyped.toString().trim()))
+            clipboard.setPrimaryClip(sensitiveClip(untyped.toString().trim()))
             toast("Couldn't type ($untypedWhy). The text is in the clipboard.")
             untyped.clear()
+        } else if (text.isNotEmpty() && Core.settings.keepOnClipboard) {
+            clipboard.setPrimaryClip(sensitiveClip(text))
         }
+        if (text.isNotEmpty()) History.add(text, raw)
+        heard.clear()
         changeState(State.IDLE)
     }
 
@@ -213,8 +294,16 @@ object Session {
         stateListeners.forEach { it(s) }
     }
 
-    private fun deliver(text: String) {
+    /** Text from the speech service: typed now, or kept for the AI. */
+    private fun heard(text: String) {
         lastSpeech = SystemClock.elapsedRealtime()
+        heard.append(text)
+        if (mode == Mode.DICTATE) deliver(text)
+    }
+
+    private fun deliver(text: String) {
+        if (text.isEmpty()) return
+        typedAny = true
         // After the first failure the rest goes to the clipboard too, so the text stays in order.
         val svc = TypingService.instance
         val why = when {
@@ -232,7 +321,7 @@ object Session {
     /** Called by the Rust core on its own threads; hands everything to the main thread. */
     private class Listener : DictationListener {
         override fun onText(text: String) {
-            main.post { if (dictation != null) deliver(text) }
+            main.post { if (dictation != null) heard(text) }
         }
 
         override fun onPartial(text: String) {
@@ -244,7 +333,7 @@ object Session {
         }
 
         override fun onFinished() {
-            main.post { if (dictation != null) done() }
+            main.post { if (dictation != null) heardAll() }
         }
     }
 }

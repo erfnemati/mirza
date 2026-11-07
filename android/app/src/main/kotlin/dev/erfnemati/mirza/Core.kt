@@ -18,6 +18,47 @@ data class SpeechSettings(
     val terms: List<String>,
 )
 
+data class BubbleSettings(
+    val show: Boolean,
+    /** Diameter in dp. */
+    val size: Int,
+    /** Percent, while idle. */
+    val opacity: Int,
+    val logo: Boolean,
+    val lockScreen: Boolean,
+)
+
+/** What a gesture on the bubble does; the ids are the config's. */
+enum class Gesture(val id: String, val label: String) {
+    DICTATE("dictate", "Dictate"),
+    REVISE("revise", "Dictate and revise with AI"),
+    OPEN_APP("open_app", "Open Mirza"),
+    NONE("none", "Nothing"),
+    ;
+
+    /** Whether it records, so a tap can start at once and a double tap only changes what happens after. */
+    val records get() = this == DICTATE || this == REVISE
+
+    companion object {
+        fun of(id: String) = entries.firstOrNull { it.id == id } ?: NONE
+    }
+}
+
+data class Gestures(val tap: Gesture, val doubleTap: Gesture, val longPress: Gesture)
+
+data class RevisionSettings(
+    /** "" when off. */
+    val provider: String,
+    val timeoutSec: Long,
+    val style: String,
+    val presets: List<String>,
+    val instructions: String,
+)
+
+data class AiSettings(val model: String, val baseUrl: String, val effort: String)
+
+data class Credit(val amount: Double, val since: String)
+
 /** The settings Kotlin needs, read from the core's JSON. The core owns the file and the defaults. */
 data class Settings(
     val activeProvider: String,
@@ -25,24 +66,54 @@ data class Settings(
     val maxSessionSec: Long,
     val proxy: String,
     val sounds: Boolean,
+    val soundVolume: Int,
     val checkUpdates: Boolean,
-    val bubbleShow: Boolean,
+    val historySize: Int,
+    val persianLetters: Boolean,
+    val keepOnClipboard: Boolean,
+    val bubble: BubbleSettings,
+    val gestures: Gestures,
     val speech: Map<String, SpeechSettings>,
+    val revision: RevisionSettings,
+    val ai: Map<String, AiSettings>,
+    val credit: Map<String, Credit>,
 ) {
     val activeSpeech: SpeechSettings get() = speech.getValue(activeProvider)
+    val bubbleShow: Boolean get() = bubble.show
 
     companion object {
         fun parse(json: String): Settings {
             val o = JSONObject(json)
             val providers = o.getJSONObject("providers")
+            val bubble = o.getJSONObject("bubble")
+            val gestures = o.getJSONObject("gestures")
+            val typing = o.getJSONObject("typing")
+            val revision = o.getJSONObject("revision")
+            val ai = o.getJSONObject("ai")
+            val credit = o.getJSONObject("credit")
             return Settings(
                 activeProvider = o.getString("active_provider"),
                 silenceStopSec = o.getLong("silence_stop_sec"),
                 maxSessionSec = o.getLong("max_session_sec"),
                 proxy = o.getString("proxy"),
                 sounds = o.getBoolean("sounds"),
+                soundVolume = o.getInt("sound_volume"),
                 checkUpdates = o.getBoolean("check_updates"),
-                bubbleShow = o.getJSONObject("bubble").getBoolean("show"),
+                historySize = o.getInt("history_size"),
+                persianLetters = typing.getBoolean("persian_letters"),
+                keepOnClipboard = typing.getBoolean("keep_on_clipboard"),
+                bubble = BubbleSettings(
+                    show = bubble.getBoolean("show"),
+                    size = bubble.getInt("size"),
+                    opacity = bubble.getInt("opacity"),
+                    logo = bubble.getBoolean("logo"),
+                    lockScreen = bubble.getBoolean("lock_screen"),
+                ),
+                gestures = Gestures(
+                    tap = Gesture.of(gestures.getString("tap")),
+                    doubleTap = Gesture.of(gestures.getString("double_tap")),
+                    longPress = Gesture.of(gestures.getString("long_press")),
+                ),
                 speech = SPEECH_SERVICES.associateWith { id ->
                     val p = providers.getJSONObject(id)
                     SpeechSettings(
@@ -52,12 +123,59 @@ data class Settings(
                         terms = p.getJSONArray("terms").strings(),
                     )
                 },
+                revision = RevisionSettings(
+                    provider = revision.getString("provider"),
+                    timeoutSec = revision.getLong("timeout_sec"),
+                    style = revision.getString("style"),
+                    presets = revision.getJSONArray("presets").strings(),
+                    instructions = revision.getString("instructions"),
+                ),
+                ai = AI_PROVIDERS.associate { p ->
+                    val a = ai.getJSONObject(p.id)
+                    p.id to AiSettings(a.getString("model"), a.getString("base_url"), a.getString("effort"))
+                },
+                credit = credit.keys().asSequence().associateWith { id ->
+                    val c = credit.getJSONObject(id)
+                    Credit(c.getDouble("amount"), c.getString("since"))
+                },
             )
         }
 
         private fun JSONArray.strings() = List(length()) { getString(it) }
     }
 }
+
+/** An AI provider for revision, as the settings show it. */
+data class AiProvider(
+    val id: String,
+    val name: String,
+    val blurb: String,
+    val keyUrl: String?,
+    /** Suggestions for the model field; the provider's own list can be loaded too. */
+    val models: List<String>,
+    /** A local server may not need one. */
+    val optionalKey: Boolean = false,
+)
+
+/** The AI providers the core knows, in the desktop's order. */
+val AI_PROVIDERS = listOf(
+    AiProvider(
+        "claude", "Claude", "Anthropic's Haiku", "https://console.anthropic.com/settings/keys",
+        listOf("claude-haiku-5-5", "claude-sonnet-5-5"),
+    ),
+    AiProvider("openai", "OpenAI", "GPT, fast and cheap", "https://platform.openai.com/api-keys", listOf("gpt-6-luna")),
+    AiProvider(
+        "gemini", "Gemini", "Google's Flash-Lite", "https://aistudio.google.com/apikey",
+        listOf("gemini-3.5-flash-lite", "gemini-3.8-flash"),
+    ),
+    AiProvider(
+        "openrouter", "OpenRouter", "Many models, one key", "https://openrouter.ai/settings/keys",
+        listOf("openai/gpt-6-luna", "google/gemini-3.5-flash-lite", "anthropic/claude-haiku-5.5"),
+    ),
+    AiProvider("local", "Local server", "vLLM, Ollama, LM Studio", null, emptyList(), optionalKey = true),
+)
+
+fun aiProvider(id: String) = AI_PROVIDERS.firstOrNull { it.id == id }
 
 /** The speech services the core knows, in the order the settings show them. */
 val SPEECH_SERVICES = listOf("soniox", "elevenlabs", "openai")
