@@ -139,6 +139,26 @@ impl Tray for MirzaTray {
             }
             .into(),
         );
+        if !v.last_task.is_empty() {
+            items.push(
+                StandardItem {
+                    label: v.task_label("Undo"),
+                    icon_name: "edit-undo".into(),
+                    activate: Box::new(|t: &mut Self| t.send(Action::UndoTask)),
+                    ..Default::default()
+                }
+                .into(),
+            );
+            items.push(
+                StandardItem {
+                    label: v.task_label("Edit"),
+                    icon_name: "document-edit".into(),
+                    activate: Box::new(|t: &mut Self| t.send(Action::EditTask)),
+                    ..Default::default()
+                }
+                .into(),
+            );
+        }
         items.push(
             StandardItem {
                 label: "Settings…".into(),

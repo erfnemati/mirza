@@ -80,6 +80,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+futures-util = "0.3.34"
 ksni = "0.3.6"
 zbus = { version = "5.19.0", default-features = false, features = ["tokio"] }
 
