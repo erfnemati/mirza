@@ -68,7 +68,16 @@ impl fmt::Debug for Credentials {
 pub trait TokenProvider: Send + Sync {
     /// A valid access token; `fresh` asks for a new one after Google refused
     /// the last.
-    fn access_token(&self, fresh: bool) -> std::result::Result<String, String>;
+    fn access_token(&self, fresh: bool) -> std::result::Result<String, TokenError>;
+}
+
+/// Why a [`TokenProvider`] has no token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TokenError {
+    /// Not signed in, or the sign-in ended: the user has to act.
+    SignedOut(String),
+    /// Google couldn't be reached now; the task tries again by itself.
+    Network(String),
 }
 
 #[derive(Clone)]
@@ -258,7 +267,12 @@ impl Google {
                 let t = tokio::task::spawn_blocking(move || p.access_token(fresh))
                     .await
                     .map_err(|e| GoogleError::new(ErrorKind::SignedOut, Api::SignIn, e.to_string()))?
-                    .map_err(|e| self.err(GoogleError::new(ErrorKind::SignedOut, Api::SignIn, e)))?;
+                    .map_err(|e| {
+                        self.err(match e {
+                            TokenError::SignedOut(d) => GoogleError::new(ErrorKind::SignedOut, Api::SignIn, d),
+                            TokenError::Network(d) => GoogleError::new(ErrorKind::Network, Api::SignIn, d),
+                        })
+                    })?;
                 return Ok(t);
             }
             TokenSource::Refresh(c) => c,

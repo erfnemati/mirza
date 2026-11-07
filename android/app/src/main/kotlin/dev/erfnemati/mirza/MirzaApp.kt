@@ -21,6 +21,8 @@ class MirzaApp : Application() {
         History.load()
         Core.listeners.add { History.trim() }
         Notes.createChannels(this)
+        Google.init()
+        VoiceTasks.init(this)
         AppLog.add(
             "started: Mirza ${BuildConfig.VERSION_NAME}, core ${dev.erfnemati.mirza.core.coreVersion()}, " +
                 "${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",

@@ -79,7 +79,7 @@ Screens, from the desktop panel:
 | Speech | Service (Soniox first; OpenAI and ElevenLabs if the core's providers work on Android), key, model, languages, "only these languages", words to expect. |
 | Bubble and gestures | Size, opacity, logo, "move it back to the start"; what tap, double tap and long press do; show on the lock screen or not. |
 | AI revision | Provider, key, model, thinking, server address (local), how much to change, presets, your own rules, time limit, "try it". |
-| Tasks | Google account (sign in or out), lists and the project names that pick them, the calendar for timed tasks, lock-screen queue limit. |
+| Voice tasks | Google account (sign in or out), lists and their other names, the list for tasks that fit none, the AI that reads tasks (the revision one by default) and its time limit, event length and due date for timed tasks, how many tasks may wait on the lock screen, the tasks said there, waiting and saved lately (Edit, Undo), and "try it". |
 | Listening | Stop after seconds of silence, time limit. |
 | Typing | Persian letters, keep a copy in the clipboard. |
 | Recent text | The last texts dictated, with the text before AI revision; copy, clear, how many to keep (on the phone only). |
@@ -89,15 +89,14 @@ Screens, from the desktop panel:
 
 ## Gestures and triggers
 
-Defaults, all changeable: tap = dictate, double tap = dictate and revise, long press = voice task
-(until voice tasks arrive in PR 3, long press opens Mirza).
+Defaults, all changeable: tap = dictate, double tap = dictate and revise, long press = voice task.
 The first tap starts recording at once; a second tap within the double-tap time only marks the
 dictation for revision (the two differ only after the audio), so a plain tap never waits. While
 listening, a tap stops.
 
 With no text field in front (home screen, a list), a tap opens the small task panel instead,
 since there is nowhere to type: it shows what you say and the task it becomes. On the lock screen
-a tap records a task for the queue.
+every gesture that records makes a task for the queue.
 
 Later in step 5: the accessibility shortcut button (`FLAG_REQUEST_ACCESSIBILITY_BUTTON`), and a
 long press or double press on volume down through the accessibility service's key events (screen
@@ -111,26 +110,38 @@ AI parser (one call through the same `[ai.*]` providers as revision, dates and J
 the Google Tasks and Calendar calls, and the queue that keeps a transcript until Google confirms
 the task. The phone uses it through `TaskBook` in `crates/mobile/src/tasks.rs`: `capture`,
 `capture_held`, `confirm`, `process`, `process_due`, `retry_now`, `next_due_ms`, `waiting`,
-`recent`, `lists`, `undo`, `edit`. Calls that reach Google or the AI block, so Kotlin runs them on
-`Dispatchers.IO`; `capture`, `capture_held` and `confirm` are fast. The notification's title and
-text come from the core (`TaskOutcome`); showing it and its buttons is Kotlin's job. Android adds:
+`recent`, `lists`, `undo`, `edit`, plus `preview` ("try it") and `ai_problem`. `MirzaCore.task_book`
+makes it from the phone's `[tasks]` settings (the desktop's task settings without the Google
+client, plus `held_limit`) and keys, and `update_task_book` hands it changed settings or keys.
+Calls that reach Google or the AI block, so Kotlin runs them off the main thread; `capture`,
+`capture_held` and `confirm` are fast. The notification's title and text come from the core
+(`TaskOutcome`), and each task comes with its list name and its day in words ("tomorrow 15:00");
+showing them and the buttons is Kotlin's job. Android adds:
 
 - **Google sign-in through Google Play services** (`AuthorizationClient`): one tap, no secret in the app, Google's way for Android. It asks for exactly the
   scopes the desktop uses: `https://www.googleapis.com/auth/tasks` and
   `https://www.googleapis.com/auth/calendar.events.owned`. Sign-in and every token refresh use
   the phone's own network, not Mirza's proxy, so the phone's VPN has to reach Google at that
-  moment; the Tasks and Calendar calls themselves go through the proxy (`TaskConfig.proxy`).
+  moment; the Tasks and Calendar calls themselves go through the proxy setting.
   Needs Play services (global Xiaomi phones have it). There is no refresh token on the phone: the
   core calls Kotlin's `GoogleTokens.access_token(fresh)` before every Google call, retries
   included, and Kotlin answers with `authorize()` (silent once allowed). `fresh = true` means
-  Google just refused the last token, so Kotlin clears it first and asks for a new one. The
+  Google just refused the last token, so Kotlin clears it first and asks for a new one. The answer
+  is a `GoogleToken`: the token, `SignedOut` (the task is kept until the user signs in) or
+  `Offline` (Google couldn't be reached, so the task waits and tries again). It is an enum rather
+  than an error because UniFFI can't carry a flat error from Kotlin back to Rust. The
   Google Cloud project is the desktop's, with an Android OAuth client for `dev.erfnemati.mirza`
   and the SHA-1 under "Signing key" (step 7 of `docs/voice-tasks.md`). While the project is in
   "Testing", only its listed test users can sign in and a sign-in ends after 7 days; "In
   production" without verification allows up to 100 users with a warning screen once.
-- **The capture flow:** gesture, microphone service, Soniox, then `capture` and `process`, then a
-  notification "Added: <title> (<list>)" with Undo and Edit. Edit opens the task panel. Events
-  use the calendar's default reminders; Mirza has no alarm or reminder of its own.
+- **The capture flow:** gesture, microphone service, Soniox. The task panel (a card over the app
+  in front) shows what is heard, with Done and Cancel. At the end `capture` keeps the text on the
+  phone and `process` reads and saves it; the panel then shows "Added: <title>" with the list and
+  the day, and Undo, Edit and Done, and goes away by itself after a few seconds. If the panel was
+  left before, a notification with Undo and Edit says it instead, and so does one for a task that
+  waits or is stuck. Edit opens the panel's form. Events use the calendar's default reminders;
+  Mirza has no alarm or reminder of its own. If even keeping the text fails, it goes to the
+  clipboard.
 - **One queue.** The lock-screen queue is the core's own queue with a hold flag: while the phone
   is locked (`KeyguardManager.isKeyguardLocked`), Kotlin calls `capture_held(text)`, which stores
   only the transcript and sends nothing to the AI or Google. After unlock, one notification says
@@ -138,13 +149,13 @@ text come from the core (`TaskOutcome`); showing it and its buttons is Kotlin's 
   Confirm (`confirm(id)` then `process(id)`), Edit (`edit`, which also releases it) and Drop
   (`undo`). There is no "Confirm all". Times are read from the
   moment the task was said, so "tomorrow" stays the day after it was said even if it is
-  confirmed later; each screen shows the resolved date. Recognition needs the internet, so with
-  no connection nothing is recorded. `TaskConfig.held_limit` (1 to 10) caps the queue; when it is
-  full `capture_held` refuses with a plain message.
+  confirmed later; each screen shows when it was said, and after Confirm the task as read, with
+  its day. Recognition needs the internet, so with no connection nothing is recorded.
+  `[tasks] held_limit` (1 to 10) caps the queue; when it is full `capture_held` refuses with a
+  plain message, which the "tasks wait" notification shows, and the error sound plays (toasts
+  don't show on many lock screens).
 - **One retry job:** a WorkManager job with a network constraint, first run after
   `next_due_ms`, that gets a token and calls `process_due` (held tasks are skipped).
-- Sign-in, the Tasks screen and the task panel are Kotlin and can be built against a stub before
-  step 4 is merged; only the real task calls wait for it.
 
 ## Order of work (one PR each into develop)
 
@@ -157,8 +168,8 @@ text come from the core (`TaskOutcome`); showing it and its buttons is Kotlin's 
    through the core), Listening, Typing, History and usage. The launcher icon and the bubble's
    logo become the desktop's (`assets/icons/io.github.erfnemati.Mirza.svg`, the teal rounded
    square with the white microphone).
-3. **Voice tasks.** Sign-in, the task panel and the Tasks screen first (against a stub), then the
-   capture flow, Undo and Edit, the lock-screen queue and the retry job once step 4 is merged.
+3. **Voice tasks.** Sign-in, the task panel and the Voice tasks screen, the capture flow, Undo and
+   Edit, the lock-screen queue and the retry job.
 4. **Triggers and polish:** accessibility button, volume key, animations, and a battery check over
    a day of use on the phone.
 5. **Release:** the Release workflow builds and signs the APK and attaches it to the GitHub
@@ -167,9 +178,7 @@ text come from the core (`TaskOutcome`); showing it and its buttons is Kotlin's 
 
 Each PR is tested on the KVM emulator with the virtual microphone (Persian clips through live
 Soniox) and says what was tested there. What the emulator can't cover goes into one phone
-checklist (below), run once on the release candidate instead of once per PR. Recording from the
-lock screen comes with the queue in PR 3; until then a tap there only plays the error sound
-(Android hides toasts behind the lock screen).
+checklist (below), run once on the release candidate instead of once per PR.
 
 ## Building and trying it
 
@@ -181,6 +190,8 @@ around; they also carry `DebugReceiver`, adb hooks that only the shell can use:
     adb shell am broadcast -n dev.erfnemati.mirza/.DebugReceiver -a mirza.TAP      # tap the bubble
     ... -a mirza.TAP --es mode revise                                               # the same, revised by AI
     ... -a mirza.SWITCH --es mode revise                                            # a double tap while it records
+    ... -a mirza.TAP --es mode task                                                 # a voice task, with the panel
+    ... -a mirza.TASK --es text_b64 <base64 text> [--ez held true]                  # a task without the microphone
     ... -a mirza.SET --es path proxy --es json '"http://10.0.2.2:10808"'           # change a setting
     ... -a mirza.UPDATE                                                             # check for updates
 
@@ -234,6 +245,23 @@ From PR 2 (the other screens and AI revision):
       unlocking with the PIN and with the fingerprint.
 - [ ] The volume slider plays a test sound at the chosen volume; start and stop sounds follow it.
 - [ ] Usage shows the Soniox numbers (through the proxy if one is set).
+
+From PR 3 (voice tasks):
+
+- [ ] Voice tasks: Sign in picks the Google account and asks for Tasks and Calendar; the screen
+      then says signed in and Read again shows the lists. Give a list other names.
+- [ ] Long press the bubble in any app and say a task with a project and a time ("tomorrow at 3,
+      meeting about the contract for <project>"). The panel shows the words, then "Added" with the
+      right list and day; the task is in Google Tasks and the event in Google Calendar, with the
+      calendar's reminder. Undo removes both; Edit changes them.
+- [ ] Say a task and press Home before it is saved: a notification "Added: ..." comes instead,
+      with working Undo and Edit buttons.
+- [ ] Tap the bubble on the home screen: the panel opens, and what you say becomes a task.
+- [ ] Lock the phone and say two tasks from the bubble there (nothing is shown, the sounds say
+      it). Unlock with the PIN or fingerprint: "2 tasks wait for you". Tap it: confirm one, drop
+      the other. A task with "tomorrow" said before midnight and confirmed after keeps its day.
+- [ ] Sign out and say a task: it is kept ("Task kept, not saved yet") and listed as waiting.
+      Sign in again: it is saved by itself.
 
 ## Signing key
 

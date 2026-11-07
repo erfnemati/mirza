@@ -16,8 +16,10 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -41,6 +43,11 @@ import androidx.compose.ui.unit.dp
  * force-stops an app swiped away there, which turns typing off.
  */
 class MainActivity : ComponentActivity(), Actions {
+    companion object {
+        /** An extra naming the screen to open, e.g. from a task notification. */
+        const val SCREEN = "screen"
+    }
+
     /** Bumped when the activity comes back, since permissions and Accessibility change outside the app. */
     private var resumes by mutableIntStateOf(0)
     private var screen by mutableStateOf(Screen.HOME)
@@ -56,11 +63,16 @@ class MainActivity : ComponentActivity(), Actions {
         resumes++
     }
 
+    private val googleSignIn = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) {
+        Google.finish(it.data)
+    }
+
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         savedInstanceState?.getString("screen")?.let { name -> Screen.entries.firstOrNull { it.name == name }?.let { screen = it } }
+        opened(intent)
         Updates.onOpen()
         setContent {
             MirzaTheme {
@@ -68,6 +80,8 @@ class MainActivity : ComponentActivity(), Actions {
                 val steps = Setup.steps(this)
                 BackHandler(enabled = screen != Screen.HOME) { screen = Screen.HOME }
                 Scaffold(
+                    // The keyboard too, so a field low on a screen scrolls up above it.
+                    contentWindowInsets = WindowInsets.safeDrawing,
                     topBar = {
                         TopAppBar(
                             title = { Text(screen.title) },
@@ -98,6 +112,7 @@ class MainActivity : ComponentActivity(), Actions {
                                 Screen.HOME -> HomeScreen(steps, this@MainActivity)
                                 Screen.SPEECH -> SpeechScreen(this@MainActivity)
                                 Screen.REVISION -> RevisionScreen(this@MainActivity)
+                                Screen.TASKS -> TasksScreen(this@MainActivity)
                                 Screen.BUBBLE -> BubbleScreen()
                                 Screen.LISTENING -> ListeningScreen()
                                 Screen.TYPING -> TypingScreen()
@@ -111,6 +126,17 @@ class MainActivity : ComponentActivity(), Actions {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        opened(intent)
+    }
+
+    /** Opened for one screen, e.g. Voice tasks from a task notification. */
+    private fun opened(i: Intent) {
+        i.getStringExtra(SCREEN)?.let { name -> Screen.entries.firstOrNull { it.name == name }?.let { screen = it } }
+        i.removeExtra(SCREEN)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -155,6 +181,18 @@ class MainActivity : ComponentActivity(), Actions {
         val i = Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
             .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName)
         if (!start(i)) appInfo()
+    }
+
+    override fun signIn() {
+        Google.signIn(this, googleSignIn)
+    }
+
+    override fun review() {
+        start(TaskPanelActivity.review(this))
+    }
+
+    override fun edit(taskId: String) {
+        start(TaskPanelActivity.edit(this, taskId))
     }
 
     private fun ask(perm: String) {

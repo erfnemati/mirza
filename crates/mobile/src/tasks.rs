@@ -1,67 +1,58 @@
 //! Voice tasks for the phone: the same queue, AI reading and Google calls as
 //! on the desktop. The app signs in with Android's own Google sign-in and
-//! hands access tokens in through [`GoogleTokens`].
+//! hands access tokens in through [`GoogleTokens`]; everything else comes from
+//! the phone's settings and keys ([`crate::MirzaCore::task_book`]).
 //!
 //! Every method that talks to Google or the AI blocks until it's done, so
 //! call them from a background thread (Kotlin: `Dispatchers.IO`).
 
-use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use mirza_core::ai::{AiProviders, Client, Kind};
-use mirza_core::tasks::google::{Endpoints, TokenProvider, TokenSource};
+use mirza_core::ai::Client;
+use mirza_core::tasks::google::{Endpoints, TokenError, TokenProvider, TokenSource};
 use mirza_core::tasks::{self, Book, Draft, Google, Outcome, Said, Setup, Store, TaskSettings, when};
 
 use super::{MobileError, runtime};
-
-/// What voice tasks need to know. Rebuilt with [`TaskBook::update`] when the
-/// settings change.
-#[derive(Debug, Clone, uniffi::Record)]
-pub struct TaskConfig {
-    /// Where the queue is kept: a folder in the app's own files.
-    pub data_dir: String,
-    /// "claude", "gemini", "openai", "openrouter", or "" to save tasks as said.
-    pub ai_provider: String,
-    /// Empty for the provider's default model.
-    pub ai_model: String,
-    pub ai_key: String,
-    /// "" or "none" for a direct connection, or an http:// or socks5:// URL.
-    pub proxy: String,
-    /// Google Tasks list id for tasks that fit no list; "" for the account's
-    /// default list.
-    pub default_list: String,
-    /// Other names for a list, by list id, e.g. "office, Acme".
-    pub list_hints: HashMap<String, String>,
-    /// Event length when none was said.
-    pub event_minutes: u32,
-    /// Whether a task with a clock time keeps its day in Google Tasks.
-    pub timed_due_date: bool,
-    /// Names spelled the way the user wants.
-    pub terms: Vec<String>,
-    /// The phone's time zone, e.g. "Asia/Tehran"; "" for the system's.
-    pub time_zone: String,
-    /// How many tasks said on the lock screen may wait for the phone to be
-    /// unlocked: 1 to 10, and 0 means 10.
-    pub held_limit: u32,
-}
+use crate::settings::{self, MobileConfig};
 
 /// Gives Google access tokens from the app's own sign-in. Called from a
 /// background thread.
 #[uniffi::export(callback_interface)]
 pub trait GoogleTokens: Send + Sync {
     /// A valid access token for the Tasks (and Calendar) scopes; `fresh`
-    /// means Google refused the last one. An error says why in plain words
-    /// (for example that the user must sign in).
-    fn access_token(&self, fresh: bool) -> Result<String, MobileError>;
+    /// means Google refused the last one.
+    fn access_token(&self, fresh: bool) -> GoogleToken;
+}
+
+/// The app's answer to [`GoogleTokens::access_token`]. An enum rather than an
+/// error, since UniFFI can't carry a flat error from Kotlin back to Rust.
+#[derive(Debug, Clone, PartialEq, uniffi::Enum)]
+pub enum GoogleToken {
+    Token {
+        token: String,
+    },
+    /// The user has to sign in (again). `detail` is a short reason; the core
+    /// writes the sentence around it.
+    SignedOut {
+        detail: String,
+    },
+    /// Google couldn't be reached now, so the task waits and tries again.
+    Offline {
+        detail: String,
+    },
 }
 
 struct Tokens(Box<dyn GoogleTokens>);
 
 impl TokenProvider for Tokens {
-    fn access_token(&self, fresh: bool) -> Result<String, String> {
-        self.0.access_token(fresh).map_err(|e| e.to_string())
+    fn access_token(&self, fresh: bool) -> Result<String, TokenError> {
+        match self.0.access_token(fresh) {
+            GoogleToken::Token { token } => Ok(token),
+            GoogleToken::SignedOut { detail } => Err(TokenError::SignedOut(detail)),
+            GoogleToken::Offline { detail } => Err(TokenError::Network(detail)),
+        }
     }
 }
 
@@ -78,12 +69,16 @@ pub struct TaskDraft {
     pub note: String,
     /// List id; "" for the default list.
     pub list: String,
+    /// The list's name, as the app shows it.
+    pub list_name: String,
     /// "2026-11-07", or "" for none.
     pub date: String,
     /// "15:00", or "" for none.
     pub time: String,
     /// Event length if one was said; 0 for the default.
     pub minutes: u32,
+    /// The day and time in words, like "tomorrow 15:00"; "" for none.
+    pub when_text: String,
     /// What was unclear or assumed.
     pub guesses: Vec<String>,
     /// Saved as said, without AI.
@@ -111,7 +106,6 @@ pub struct SavedTask {
     pub id: String,
     pub text: String,
     pub draft: TaskDraft,
-    pub list_name: String,
     pub has_event: bool,
     pub saved_ms: i64,
 }
@@ -151,49 +145,76 @@ pub struct TaskEdit {
     pub minutes: u32,
 }
 
-fn draft_out(d: &Draft) -> TaskDraft {
-    TaskDraft {
-        title: d.title.clone(),
-        note: d.note.clone(),
-        list: d.list.clone(),
-        date: d.date.map(|x| x.to_string()).unwrap_or_default(),
-        time: d.time.map(|t| t.strftime("%H:%M").to_string()).unwrap_or_default(),
-        minutes: d.minutes,
-        guesses: d.guesses.clone(),
-        raw: d.raw,
+/// What the app needs to show tasks: the list names and today's date.
+struct View {
+    lists: Vec<tasks::List>,
+    today: jiff::civil::Date,
+}
+
+impl View {
+    fn draft(&self, d: &Draft) -> TaskDraft {
+        TaskDraft {
+            title: d.title.clone(),
+            note: d.note.clone(),
+            list: d.list.clone(),
+            list_name: tasks::list_name(&self.lists, &d.list).to_owned(),
+            date: d.date.map(|x| x.to_string()).unwrap_or_default(),
+            time: d.time.map(|t| t.strftime("%H:%M").to_string()).unwrap_or_default(),
+            minutes: d.minutes,
+            when_text: when::describe(&d.when(), self.today),
+            guesses: d.guesses.clone(),
+            raw: d.raw,
+        }
+    }
+
+    fn waiting(&self, e: &tasks::Entry) -> WaitingTask {
+        WaitingTask {
+            id: e.id.clone(),
+            text: e.text.clone(),
+            said_ms: e.said.at_ms,
+            attempts: e.attempts,
+            next_try_ms: e.next_try_ms,
+            last_error: e.last_error.clone(),
+            draft: e.draft.as_ref().map(|d| self.draft(d)),
+            held: e.held,
+        }
     }
 }
 
-fn setup(c: &TaskConfig, tokens: Arc<dyn TokenProvider>) -> Result<Setup, MobileError> {
+/// What [`Book`] needs, from the phone's settings and keys.
+fn setup(cfg: &MobileConfig, store: &settings::Store, tokens: Arc<dyn TokenProvider>) -> Result<Setup, MobileError> {
     let bad = |e: String| MobileError::Settings(e);
-    let proxy = mirza_core::net::resolve_proxy(if c.proxy.trim().is_empty() { "none" } else { &c.proxy })
-        .map_err(|e| bad(e.to_string()))?;
+    let proxy = mirza_core::net::resolve_proxy(&cfg.proxy).map_err(|e| bad(e.to_string()))?;
+    let t = &cfg.tasks;
     let settings = TaskSettings {
-        provider: c.ai_provider.trim().to_owned(),
-        default_list: c.default_list.trim().to_owned(),
-        event_minutes: c.event_minutes,
-        timed_due_date: c.timed_due_date,
-        list_hints: c.list_hints.iter().map(|(k, v)| (k.clone(), v.clone())).collect::<BTreeMap<_, _>>(),
+        provider: t.provider.trim().to_owned(),
+        timeout_sec: t.timeout_sec,
+        default_list: t.default_list.trim().to_owned(),
+        event_minutes: t.event_minutes,
+        timed_due_date: t.timed_due_date,
+        list_hints: t.list_hints.clone(),
         ..TaskSettings::default()
     };
-    let timeout = Duration::from_secs(settings.timeout_sec);
-    let (ai, ai_problem) = match c.ai_provider.trim() {
-        "" => (None, "no AI is chosen for voice tasks".to_owned()),
-        p => {
-            let kind = Kind::parse(p).ok_or_else(|| bad(format!("Unknown AI provider \"{p}\".")))?;
-            let mut s = AiProviders::default().get(kind).clone();
-            if !c.ai_model.trim().is_empty() {
-                s.model = c.ai_model.trim().to_owned();
+    let timeout = Duration::from_secs(t.timeout_sec.max(5));
+    let (ai, ai_problem) = match settings.kind(&cfg.revision) {
+        None => (None, "no AI is chosen for voice tasks".to_owned()),
+        Some(kind) => {
+            let key = store.key(kind.id());
+            if kind.needs_key() && key.is_none() {
+                (None, format!("there is no {} API key yet", kind.name()))
+            } else {
+                match Client::new(kind, cfg.ai.get(kind), key, proxy.as_ref(), timeout) {
+                    Ok(c) => (Some(c), String::new()),
+                    Err(e) => (None, e.to_string()),
+                }
             }
-            let key = Some(c.ai_key.trim().to_owned()).filter(|k| !k.is_empty());
-            let client = Client::new(kind, &s, key, proxy.as_ref(), timeout).map_err(|e| bad(e.to_string()))?;
-            (Some(client), String::new())
         }
     };
+    let terms = cfg.providers.get(&cfg.active_provider).map(|p| p.terms.clone()).unwrap_or_default();
     let google =
         Google::new(TokenSource::External(tokens), proxy.as_ref(), Endpoints::default(), Duration::from_secs(20))
             .map_err(|e| bad(e.to_string()))?;
-    Ok(Setup { settings, ai, ai_problem, terms: c.terms.clone(), google: Some(google), google_problem: String::new() })
+    Ok(Setup { settings, ai, ai_problem, terms, google: Some(google), google_problem: String::new() })
 }
 
 /// The phone's voice tasks: the waiting ones, the saved ones, and what
@@ -208,12 +229,52 @@ pub struct TaskBook {
 }
 
 impl TaskBook {
+    /// The queue in `data_dir`, with the phone's settings.
+    pub(crate) fn create(
+        cfg: &MobileConfig,
+        store: &settings::Store,
+        data_dir: &str,
+        time_zone: String,
+        tokens: Box<dyn GoogleTokens>,
+    ) -> Result<Arc<Self>, MobileError> {
+        if data_dir.trim().is_empty() {
+            return Err(MobileError::Settings("No folder for the task queue.".into()));
+        }
+        let tokens: Arc<dyn TokenProvider> = Arc::new(Tokens(tokens));
+        let setup = setup(cfg, store, tokens.clone())?;
+        Ok(Arc::new(Self {
+            book: Book::new(Store::new(data_dir.trim())),
+            tokens,
+            setup: RwLock::new(Arc::new(setup)),
+            time_zone: RwLock::new(time_zone),
+            held_limit: AtomicU32::new(cfg.tasks.held_limit),
+        }))
+    }
+
+    /// New settings or keys; the queue stays.
+    pub(crate) fn reload(
+        &self,
+        cfg: &MobileConfig,
+        store: &settings::Store,
+        time_zone: String,
+    ) -> Result<(), MobileError> {
+        let s = setup(cfg, store, self.tokens.clone())?;
+        *self.setup.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(s);
+        *self.time_zone.write().unwrap_or_else(|e| e.into_inner()) = time_zone;
+        self.held_limit.store(cfg.tasks.held_limit, Ordering::Relaxed);
+        Ok(())
+    }
+
     fn setup(&self) -> Arc<Setup> {
         self.setup.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    fn lists_now(&self) -> Vec<tasks::List> {
-        self.book.store().lists().map(|(_, l)| l).unwrap_or_default()
+    fn view(&self) -> View {
+        let tz = self.time_zone.read().unwrap_or_else(|e| e.into_inner()).clone();
+        View {
+            lists: self.book.store().lists().map(|(_, l)| l).unwrap_or_default(),
+            today: Said::at(jiff_now_ms(), &tz).zoned().date(),
+        }
     }
 
     fn outcome(&self, o: &Outcome) -> TaskOutcome {
@@ -223,8 +284,8 @@ impl TaskBook {
             Outcome::Stuck { entry, .. } => (entry.id.clone(), TaskState::Stuck),
             Outcome::Gone(id) => (id.clone(), TaskState::Gone),
         };
-        let today = Said::at(jiff_now_ms(), &self.time_zone.read().unwrap_or_else(|e| e.into_inner())).zoned().date();
-        let (title, body) = tasks::notification(o, &self.lists_now(), today).unwrap_or_default();
+        let v = self.view();
+        let (title, body) = tasks::notification(o, &v.lists, v.today).unwrap_or_default();
         TaskOutcome { id, state, title, body }
     }
 }
@@ -235,31 +296,6 @@ fn jiff_now_ms() -> i64 {
 
 #[uniffi::export]
 impl TaskBook {
-    #[uniffi::constructor]
-    pub fn new(config: TaskConfig, tokens: Box<dyn GoogleTokens>) -> Result<Arc<Self>, MobileError> {
-        if config.data_dir.trim().is_empty() {
-            return Err(MobileError::Settings("No folder for the task queue.".into()));
-        }
-        let tokens: Arc<dyn TokenProvider> = Arc::new(Tokens(tokens));
-        let setup = setup(&config, tokens.clone())?;
-        Ok(Arc::new(Self {
-            book: Book::new(Store::new(config.data_dir.trim())),
-            tokens,
-            setup: RwLock::new(Arc::new(setup)),
-            time_zone: RwLock::new(config.time_zone),
-            held_limit: AtomicU32::new(config.held_limit),
-        }))
-    }
-
-    /// New settings; the queue stays.
-    pub fn update(&self, config: TaskConfig) -> Result<(), MobileError> {
-        let s = setup(&config, self.tokens.clone())?;
-        *self.setup.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(s);
-        *self.time_zone.write().unwrap_or_else(|e| e.into_inner()) = config.time_zone;
-        self.held_limit.store(config.held_limit, Ordering::Relaxed);
-        Ok(())
-    }
-
     /// Keeps what was said, on disk, before anything else. Fast; then call
     /// [`TaskBook::process`] with the id.
     pub fn capture(&self, text: String) -> Result<WaitingTask, MobileError> {
@@ -271,7 +307,7 @@ impl TaskBook {
             .book
             .capture(&text, Said::at(jiff_now_ms(), &tz), false)
             .map_err(|e| MobileError::Settings(format!("Can't keep the task on the phone: {e}")))?;
-        Ok(waiting_out(&e))
+        Ok(self.view().waiting(&e))
     }
 
     /// Keeps a task said on the lock screen, on disk only: nothing goes to
@@ -288,7 +324,7 @@ impl TaskBook {
             n => n as usize,
         };
         let e = self.book.hold(&text, Said::at(jiff_now_ms(), &tz), limit).map_err(MobileError::Settings)?;
-        Ok(waiting_out(&e))
+        Ok(self.view().waiting(&e))
     }
 
     /// Confirms a task kept on the lock screen; then save it with
@@ -296,6 +332,22 @@ impl TaskBook {
     /// False when it isn't waiting for confirmation. Fast.
     pub fn confirm(&self, id: String) -> bool {
         self.book.release(&id)
+    }
+
+    /// Reads `text` the way a spoken task is read, without keeping or saving
+    /// anything ("Try it" on the Voice tasks screen). Blocks.
+    pub fn preview(&self, text: String) -> Result<TaskDraft, MobileError> {
+        let setup = self.setup();
+        runtime()
+            .block_on(self.book.preview(&setup, &text))
+            .map(|d| self.view().draft(&d))
+            .map_err(MobileError::Settings)
+    }
+
+    /// Why tasks are saved word for word right now ("" when an AI reads them).
+    pub fn ai_problem(&self) -> String {
+        let setup = self.setup();
+        if setup.ai.is_some() { String::new() } else { setup.ai_problem.clone() }
     }
 
     /// Saves one task: AI reading, Google Tasks, Calendar. Blocks.
@@ -324,20 +376,20 @@ impl TaskBook {
     }
 
     pub fn waiting(&self) -> Vec<WaitingTask> {
-        self.book.waiting().iter().map(waiting_out).collect()
+        let v = self.view();
+        self.book.waiting().iter().map(|e| v.waiting(e)).collect()
     }
 
     /// Saved tasks, newest first (the last 20).
     pub fn recent(&self) -> Vec<SavedTask> {
-        let lists = self.lists_now();
+        let v = self.view();
         self.book
             .recent()
             .iter()
             .map(|s| SavedTask {
                 id: s.id.clone(),
                 text: s.text.clone(),
-                draft: draft_out(&s.draft),
-                list_name: tasks::list_name(&lists, &s.draft.list).to_owned(),
+                draft: v.draft(&s.draft),
                 has_event: s.event.is_some(),
                 saved_ms: s.saved_ms,
             })
@@ -377,19 +429,6 @@ impl TaskBook {
     }
 }
 
-fn waiting_out(e: &tasks::Entry) -> WaitingTask {
-    WaitingTask {
-        id: e.id.clone(),
-        text: e.text.clone(),
-        said_ms: e.said.at_ms,
-        attempts: e.attempts,
-        next_try_ms: e.next_try_ms,
-        last_error: e.last_error.clone(),
-        draft: e.draft.as_ref().map(draft_out),
-        held: e.held,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,37 +436,39 @@ mod tests {
     struct NoSignIn;
 
     impl GoogleTokens for NoSignIn {
-        fn access_token(&self, _fresh: bool) -> Result<String, MobileError> {
-            Err(MobileError::Settings("Sign in to Google in Mirza first.".into()))
+        fn access_token(&self, _fresh: bool) -> GoogleToken {
+            GoogleToken::SignedOut { detail: String::new() }
         }
     }
 
-    fn config(dir: &std::path::Path) -> TaskConfig {
-        TaskConfig {
-            data_dir: dir.to_string_lossy().into_owned(),
-            ai_provider: String::new(),
-            ai_model: String::new(),
-            ai_key: String::new(),
-            proxy: String::new(),
-            default_list: String::new(),
-            list_hints: HashMap::new(),
-            event_minutes: 30,
-            timed_due_date: true,
-            terms: vec![],
-            time_zone: "Asia/Tehran".into(),
-            held_limit: 0,
+    /// A book in a fresh folder, with the settings `change` makes.
+    fn book(name: &str, change: impl FnOnce(&mut MobileConfig)) -> (Arc<TaskBook>, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("mirza-mobile-{name}-{}-{}", std::process::id(), jiff_now_ms()));
+        let mut cfg = MobileConfig::default();
+        change(&mut cfg);
+        let store = settings::Store::new(&dir);
+        let data = dir.join("tasks").to_string_lossy().into_owned();
+        let book = TaskBook::create(&cfg, &store, &data, "Asia/Tehran".into(), Box::new(NoSignIn)).unwrap();
+        (book, dir)
+    }
+
+    struct Offline;
+
+    impl GoogleTokens for Offline {
+        fn access_token(&self, _fresh: bool) -> GoogleToken {
+            GoogleToken::Offline { detail: "no connection".into() }
         }
     }
 
     #[test]
     fn signed_out_tasks_stay_on_the_phone() {
-        let dir = std::env::temp_dir().join(format!("mirza-mobile-tasks-{}", jiff_now_ms()));
-        let book = TaskBook::new(config(&dir), Box::new(NoSignIn)).unwrap();
+        let (book, dir) = book("tasks", |_| {});
+        assert_eq!(book.ai_problem(), "no AI is chosen for voice tasks");
         let w = book.capture("buy milk".into()).unwrap();
         let o = book.process(w.id.clone());
         assert_eq!(o.state, TaskState::Stuck);
         assert!(o.title.contains("buy milk"), "{o:?}");
-        assert!(o.body.contains("Sign in to Google in Mirza first"), "{o:?}");
+        assert!(o.body.starts_with("Mirza isn't signed in to Google. Sign in"), "{o:?}");
         assert_eq!(book.waiting().len(), 1);
         assert!(book.next_due_ms().is_some());
 
@@ -447,14 +488,14 @@ mod tests {
 
         book.undo(w.id).unwrap();
         assert!(book.waiting().is_empty());
-        assert!(book.update(TaskConfig { ai_provider: "nope".into(), ..config(&dir) }).is_err());
+        let cfg = MobileConfig { proxy: "ftp://nowhere".into(), ..MobileConfig::default() };
+        assert!(book.reload(&cfg, &settings::Store::new(&dir), String::new()).is_err());
         std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
     fn lock_screen_tasks_wait_until_confirmed() {
-        let dir = std::env::temp_dir().join(format!("mirza-mobile-held-{}", jiff_now_ms()));
-        let book = TaskBook::new(TaskConfig { held_limit: 1, ..config(&dir) }, Box::new(NoSignIn)).unwrap();
+        let (book, dir) = book("held", |c| c.tasks.held_limit = 1);
         let w = book.capture_held("buy milk".into()).unwrap();
         assert!(w.held);
         assert!(book.capture_held("call Sara".into()).is_err(), "the limit is 1");
@@ -465,12 +506,33 @@ mod tests {
         assert!(book.confirm(w.id.clone()));
         assert!(!book.waiting()[0].held);
         assert_eq!(book.process(w.id.clone()).state, TaskState::Stuck, "not signed in");
-        book.update(config(&dir)).unwrap();
+        book.reload(&MobileConfig::default(), &settings::Store::new(&dir), "Asia/Tehran".into()).unwrap();
         book.undo(w.id).unwrap();
         for _ in 0..tasks::HELD_MAX {
             book.capture_held("x".into()).unwrap();
         }
-        assert!(book.capture_held("x".into()).is_err(), "0 means 10");
+        assert!(book.capture_held("x".into()).is_err(), "the default is 10");
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn offline_tasks_wait_and_try_again() {
+        let dir = std::env::temp_dir().join(format!("mirza-mobile-offline-{}-{}", std::process::id(), jiff_now_ms()));
+        let store = settings::Store::new(&dir);
+        let data = dir.join("tasks").to_string_lossy().into_owned();
+        let book = TaskBook::create(&MobileConfig::default(), &store, &data, String::new(), Box::new(Offline)).unwrap();
+        let w = book.capture("buy milk".into()).unwrap();
+        let o = book.process(w.id);
+        assert_eq!(o.state, TaskState::Waiting, "{o:?}");
+        assert!(o.body.contains("Couldn't reach Google sign-in"), "{o:?}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_ai_needs_its_key() {
+        let (book, dir) = book("nokey", |c| c.tasks.provider = "claude".into());
+        assert_eq!(book.ai_problem(), "there is no Claude API key yet");
+        assert!(book.preview("buy milk".into()).is_err());
+        let _ = std::fs::remove_dir_all(dir); // nothing was written
     }
 }

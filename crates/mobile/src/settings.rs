@@ -46,6 +46,8 @@ pub struct MobileConfig {
     pub ai: AiProviders,
     /// Prepaid credit per provider, so the app can show what is left.
     pub credit: BTreeMap<String, Credit>,
+    /// Voice tasks: what you say becomes a Google Tasks entry.
+    pub tasks: Tasks,
 }
 
 impl Default for MobileConfig {
@@ -66,6 +68,7 @@ impl Default for MobileConfig {
             revision: Revision::default(),
             ai: AiProviders::default(),
             credit: BTreeMap::new(),
+            tasks: Tasks::default(),
         }
     }
 }
@@ -107,6 +110,43 @@ impl Default for Bubble {
     }
 }
 
+/// The phone's `[tasks]`: the desktop's task settings without the Google client (the phone signs
+/// in through Google Play services), plus the lock-screen queue.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Tasks {
+    /// "" uses AI revision's provider; otherwise "claude", "gemini", "openai", "openrouter" or
+    /// "local". With neither, tasks are saved as said.
+    pub provider: String,
+    /// How long to wait for the AI before saving the task as said.
+    pub timeout_sec: u64,
+    /// Google Tasks list id for tasks that fit no list; "" is the account's default list.
+    pub default_list: String,
+    /// Event length when none was said.
+    pub event_minutes: u32,
+    /// A task with a clock time also gets that day as its due date, besides the Calendar event.
+    pub timed_due_date: bool,
+    /// Other names for a list, by Google Tasks list id, e.g. "office, Acme".
+    pub list_hints: BTreeMap<String, String>,
+    /// How many tasks said on the lock screen may wait for the phone to be unlocked, 1 to 10.
+    pub held_limit: u32,
+}
+
+impl Default for Tasks {
+    fn default() -> Self {
+        let t = mirza_core::tasks::TaskSettings::default();
+        Self {
+            provider: String::new(),
+            timeout_sec: t.timeout_sec,
+            default_list: String::new(),
+            event_minutes: t.event_minutes,
+            timed_due_date: t.timed_due_date,
+            list_hints: BTreeMap::new(),
+            held_limit: mirza_core::tasks::HELD_MAX as u32,
+        }
+    }
+}
+
 /// What a gesture on the bubble does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -115,6 +155,8 @@ pub enum Gesture {
     Dictate,
     /// Dictation revised by AI before it's typed.
     Revise,
+    /// Say a task for Google Tasks.
+    Task,
     /// Open Mirza's settings.
     OpenApp,
     None,
@@ -130,7 +172,7 @@ pub struct Gestures {
 
 impl Default for Gestures {
     fn default() -> Self {
-        Self { tap: Gesture::Dictate, double_tap: Gesture::Revise, long_press: Gesture::OpenApp }
+        Self { tap: Gesture::Dictate, double_tap: Gesture::Revise, long_press: Gesture::Task }
     }
 }
 
@@ -169,6 +211,20 @@ impl MobileConfig {
         }
         if !(1..=120).contains(&self.revision.timeout_sec) {
             return Err("revision.timeout_sec must be 1 to 120".into());
+        }
+        let t = &self.tasks;
+        let p = t.provider.trim();
+        if !p.is_empty() && Kind::parse(p).is_none() {
+            return Err(format!("unknown AI provider {p:?}"));
+        }
+        if !(5..=120).contains(&t.timeout_sec) {
+            return Err("tasks.timeout_sec must be 5 to 120".into());
+        }
+        if !(5..=1440).contains(&t.event_minutes) {
+            return Err("tasks.event_minutes must be 5 to 1440".into());
+        }
+        if !(1..=mirza_core::tasks::HELD_MAX as u32).contains(&t.held_limit) {
+            return Err(format!("tasks.held_limit must be 1 to {}", mirza_core::tasks::HELD_MAX));
         }
         Ok(())
     }
@@ -322,8 +378,15 @@ mod tests {
         assert!(store.set("gestures.tap", &json!("none")).is_err());
         assert!(store.set("gestures.tap", &json!("fly")).is_err());
         assert!(store.set("revision.provider", &json!("bard")).is_err());
+        assert_eq!(MobileConfig::default().gestures.long_press, Gesture::Task);
         let cfg = store.set("gestures.long_press", &json!("revise")).unwrap();
         assert_eq!(cfg.gestures.long_press, Gesture::Revise);
+        assert!(store.set("tasks.held_limit", &json!(11)).is_err());
+        assert!(store.set("tasks.held_limit", &json!(0)).is_err());
+        assert!(store.set("tasks.provider", &json!("bard")).is_err());
+        store.set("tasks.list_hints.abc", &json!("office, Acme")).unwrap();
+        let cfg = store.set("tasks.held_limit", &json!(3)).unwrap();
+        assert_eq!((cfg.tasks.held_limit, cfg.tasks.list_hints["abc"].as_str()), (3, "office, Acme"));
         let cfg = store.set("revision.provider", &json!("claude")).unwrap();
         assert_eq!(cfg.revision.kind(), Some(Kind::Claude));
         assert_eq!(cfg.ai.claude.model, "claude-haiku-5-5", "the desktop's defaults");

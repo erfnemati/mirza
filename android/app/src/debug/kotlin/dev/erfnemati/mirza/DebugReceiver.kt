@@ -9,9 +9,10 @@ import android.util.Base64
  * Test hooks for adb, in debug builds only; only the shell can send these (see the manifest).
  *
  *   am broadcast -n dev.erfnemati.mirza/.DebugReceiver -a mirza.TAP     starts or stops dictation
- *   ... -a mirza.TAP --es mode revise                                   the same, revised by AI
+ *   ... -a mirza.TAP --es mode revise                                   the same, revised by AI (or task: a voice task)
  *   ... -a mirza.SWITCH --es mode revise                                what a double tap does while it records
  *   ... -a mirza.TYPE --es text_b64 <base64>                            types without dictation
+ *   ... -a mirza.TASK --es text_b64 <base64> [--ez held true]           a voice task without the microphone
  *   ... -a mirza.SET --es path proxy --es json '"socks5://10.0.2.2:10808"'   changes a setting
  *   ... -a mirza.UPDATE                                                 checks for updates now
  */
@@ -25,6 +26,10 @@ class DebugReceiver : BroadcastReceiver() {
                 val svc = TypingService.instance
                 AppLog.add("adb type: " + if (svc == null) "typing is off" else svc.type(text) ?: "typed")
             }
+            "mirza.TASK" -> {
+                val text = intent.getStringExtra("text_b64")?.let { String(Base64.decode(it, Base64.DEFAULT)) } ?: return
+                if (intent.getBooleanExtra("held", false)) VoiceTasks.hold(text) else VoiceTasks.add(text)
+            }
             "mirza.SET" -> {
                 val path = intent.getStringExtra("path") ?: return
                 val json = intent.getStringExtra("json") ?: "null"
@@ -34,5 +39,9 @@ class DebugReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun mode(i: Intent) = if (i.getStringExtra("mode") == "revise") Session.Mode.REVISE else Session.Mode.DICTATE
+    private fun mode(i: Intent) = when (i.getStringExtra("mode")) {
+        "revise" -> Session.Mode.REVISE
+        "task" -> Session.Mode.TASK
+        else -> Session.Mode.DICTATE
+    }
 }
