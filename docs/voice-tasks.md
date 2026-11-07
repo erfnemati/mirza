@@ -76,9 +76,14 @@ and events it added itself.
 3. It now says **In production**. If Google mentions verification, ignore it: don't click
    **Prepare for verification**.
 
-Why: in Testing, Google signs Mirza out every 7 days. In production without verification, the
-sign-in lasts, and up to 100 Google accounts can ever use your client, which is plenty for you
-and a few friends. The price is a warning screen at sign-in (see below).
+If **Publish app** is greyed out, Google wants the
+[Branding](https://console.cloud.google.com/auth/branding) page complete first: open it, fill in
+what it marks as missing (still no logo), save, and come back.
+
+Why: in Testing, Google signs Mirza out every 7 days, and only the accounts listed under **Test
+users** on the Audience page can sign in at all. In production without verification, the sign-in
+lasts, and up to 100 Google accounts can ever use your client, which is plenty for you and a few
+friends. The price is a warning screen at sign-in (see below).
 
 ### 6. Create the client
 
