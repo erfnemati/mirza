@@ -198,7 +198,8 @@ showing them and the buttons is Kotlin's job. Android adds:
    day of use on the phone.
 5. **Release:** the Release workflow builds and signs the APK and attaches it to the GitHub
    release next to the desktop installers (only the real app, not the trial), and an install
-   guide (Play Protect, restricted settings, Xiaomi).
+   guide ([install-android.md](install-android.md): Play Protect, restricted settings, Xiaomi),
+   linked from the README.
 
 Each PR is tested on the KVM emulator with the virtual microphone (Persian clips through live
 Soniox) and says what was tested there. What the emulator can't cover goes into one phone
@@ -233,6 +234,13 @@ from screenshots instead. `adb shell input keyevent` never reaches an accessibil
 the same with `1 114 0` for up (event1 is the emulator's keyboard; `getevent -pl` lists them).
 `adb unroot` afterwards. If the emulator's microphone gives only silence ("microphone silent
 after 3 s") even after `emulator.sh mic`, restarting the emulator fixes it.
+
+Release builds come from the Release workflow's Android job: `:app:assembleRelease` (R8 on) for
+arm64-v8a and x86_64, signed with the release key from the GitHub secrets. The job checks the
+certificate's SHA-256 with `apksigner` and fails if it isn't the one under "Signing key", then
+attaches `Mirza-<version>-android.apk` to the release. Run by hand (Actions, Release, Run
+workflow) it builds everything without a release and leaves the APK in the `android` artifact:
+that is the release candidate for the phone checklist.
 
 ## Phone checklist
 
@@ -308,6 +316,15 @@ From PR 4 (triggers and polish):
       With animations off in Developer options, nothing pulses.
 - [ ] Battery: a day of normal use with the bubble on and a volume gesture set. Settings, Battery,
       Mirza should be about as low as before PR 4 (note the number).
+
+From PR 5 (release):
+
+- [ ] Install the release candidate from the browser on the phone, following
+      [install-android.md](install-android.md) step by step; fix the guide where the phone says
+      something else (Play Protect's buttons, the restricted-setting menu, Xiaomi's names).
+- [ ] About shows the version; "Check for updates" on the General screen says it is up to date.
+- [ ] Once the next version is out: opening Mirza shows the update card, it opens the release page,
+      and the new APK installs over the old one with settings, keys and the Google sign-in kept.
 
 ## Signing key
 
