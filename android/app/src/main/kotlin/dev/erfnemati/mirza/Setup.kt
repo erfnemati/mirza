@@ -117,8 +117,8 @@ object Setup {
      * The accessibility settings, with Mirza marked where the phone supports that. Mirza's own page
      * there (ACCESSIBILITY_DETAILS_SETTINGS) needs a system permission, so apps can't open it.
      */
-    fun accessibilityIntent(ctx: Context): Intent {
-        val name = ComponentName(ctx, TypingService::class.java).flattenToString()
+    fun accessibilityIntent(ctx: Context, service: Class<*> = TypingService::class.java): Intent {
+        val name = ComponentName(ctx, service).flattenToString()
         val highlight = Bundle().apply { putString(":settings:fragment_args_key", name) }
         return Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS)
             .putExtra(":settings:fragment_args_key", name)

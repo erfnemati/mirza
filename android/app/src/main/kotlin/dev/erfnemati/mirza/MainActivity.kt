@@ -13,6 +13,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -97,7 +99,14 @@ class MainActivity : ComponentActivity(), Actions {
                 ) { pad ->
                     AnimatedContent(
                         targetState = screen,
-                        transitionSpec = { fadeIn() togetherWith fadeOut() },
+                        // A screen comes in from the side and Back takes it out the same way, as
+                        // in Android's own settings.
+                        transitionSpec = {
+                            val back = targetState == Screen.HOME
+                            val dir = if (back) -1 else 1
+                            (slideInHorizontally { dir * it / 5 } + fadeIn()) togetherWith
+                                (slideOutHorizontally { -dir * it / 5 } + fadeOut())
+                        },
                         label = "screen",
                         modifier = Modifier.padding(pad),
                     ) { shown ->

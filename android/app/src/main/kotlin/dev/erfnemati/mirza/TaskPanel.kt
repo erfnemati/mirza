@@ -5,6 +5,15 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -153,29 +162,10 @@ class TaskPanelActivity : ComponentActivity() {
                         .fillMaxSize()
                         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { leave() },
                 ) {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .navigationBarsPadding()
-                            .imePadding()
-                            .padding(12.dp)
-                            // Taps on the card stay on the card.
-                            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
-                    ) {
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.padding(20.dp).verticalScroll(rememberScrollState()),
-                        ) {
-                            when (v) {
-                                TaskPanel.Listening -> ListeningView()
-                                is TaskPanel.Saving -> SavingView(v)
-                                is TaskPanel.Done -> DoneView(v)
-                                is TaskPanel.Edit -> EditView(v)
-                                TaskPanel.Review -> ReviewView()
-                                null -> {}
-                            }
-                        }
+                    // The card slides up from the bottom edge when the panel opens.
+                    val entered = remember { MutableTransitionState(false).apply { targetState = true } }
+                    AnimatedVisibility(visibleState = entered, enter = slideInVertically { it / 2 } + fadeIn()) {
+                        PanelCard(v)
                     }
                 }
             }
@@ -209,6 +199,42 @@ class TaskPanelActivity : ComponentActivity() {
     private fun leave() {
         if (TaskPanel.view == TaskPanel.Listening) Session.stop("panel closed")
         TaskPanel.close()
+    }
+}
+
+/** The panel's card: one view at a time, each fading into the next while the card resizes. */
+@Composable
+private fun PanelCard(v: TaskPanel.View?) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .imePadding()
+            .padding(12.dp)
+            // Taps on the card stay on the card.
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
+    ) {
+        AnimatedContent(
+            targetState = v,
+            contentKey = { it?.javaClass },
+            transitionSpec = { fadeIn(tween(180, delayMillis = 60)) togetherWith fadeOut(tween(90)) },
+            label = "panel",
+        ) { shown ->
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.padding(20.dp).verticalScroll(rememberScrollState()).animateContentSize(),
+            ) {
+                when (shown) {
+                    TaskPanel.Listening -> ListeningView()
+                    is TaskPanel.Saving -> SavingView(shown)
+                    is TaskPanel.Done -> DoneView(shown)
+                    is TaskPanel.Edit -> EditView(shown)
+                    TaskPanel.Review -> ReviewView()
+                    null -> {}
+                }
+            }
+        }
     }
 }
 

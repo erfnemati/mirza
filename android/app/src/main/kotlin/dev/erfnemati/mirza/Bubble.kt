@@ -1,15 +1,22 @@
 package dev.erfnemati.mirza
 
 import android.accessibilityservice.AccessibilityService
+import android.animation.Animator
+import android.animation.ArgbEvaluator
+import android.animation.ObjectAnimator
+import android.animation.PropertyValuesHolder
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
-import android.content.Intent
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.os.SystemClock
 import android.view.Gravity
+import android.os.Build
 import android.view.MotionEvent
+import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.ImageView
 import kotlin.math.hypot
 
@@ -17,7 +24,8 @@ import kotlin.math.hypot
  * The floating button, drawn by the typing service as an accessibility overlay (it also shows on
  * the lock screen). What a tap, a double tap and a long press do comes from the settings; a drag
  * moves it and the place is kept. Size and look are fixed for its life: the service makes a new
- * one when they change.
+ * one when they change. Its animations are short and plain: it shrinks a little under the finger,
+ * fades between the state colors, and breathes while it listens.
  */
 @SuppressLint("ClickableViewAccessibility")
 class Bubble(private val svc: AccessibilityService, private val look: BubbleSettings) {
@@ -58,6 +66,10 @@ class Bubble(private val svc: AccessibilityService, private val look: BubbleSett
     }
     private val onState: (Session.State) -> Unit = { paint(it) }
     private var shown = false
+    private var colors: IntArray? = null
+    private var colorAnim: ValueAnimator? = null
+    private var scaleAnim: Animator? = null
+    private var pulsing = false
 
     /** When a tap that may become a double tap began something (or is waiting to), else 0. */
     private var firstTapAt = 0L
@@ -101,6 +113,7 @@ class Bubble(private val svc: AccessibilityService, private val look: BubbleSett
         view.setOnTouchListener { v, e ->
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    if (!pulsing) scaleTo(0.88f, 80)
                     downX = e.rawX
                     downY = e.rawY
                     startX = lp.x
@@ -117,20 +130,27 @@ class Bubble(private val svc: AccessibilityService, private val look: BubbleSett
                         v.removeCallbacks(longPressAction)
                     }
                     if (dragging) {
-                        lp.x = startX + dx.toInt()
-                        lp.y = startY + dy.toInt()
+                        // Android keeps the window on the screen anyway; kept here too, so a
+                        // drag back moves it at once instead of first making up the overshoot.
+                        val (w, h) = screenSize()
+                        lp.x = (startX + dx.toInt()).coerceIn(0, maxOf(0, w - size))
+                        lp.y = (startY + dy.toInt()).coerceIn(0, maxOf(0, h - size))
                         wm.updateViewLayout(view, lp)
                     }
                 }
                 MotionEvent.ACTION_UP -> {
                     v.removeCallbacks(longPressAction)
+                    if (!pulsing) scaleTo(1f, 120)
                     if (dragging) {
                         prefs.edit().putInt("bubble_x", lp.x).putInt("bubble_y", lp.y).apply()
                     } else if (!longPressed) {
                         tapped()
                     }
                 }
-                MotionEvent.ACTION_CANCEL -> v.removeCallbacks(longPressAction)
+                MotionEvent.ACTION_CANCEL -> {
+                    v.removeCallbacks(longPressAction)
+                    if (!pulsing) scaleTo(1f, 120)
+                }
             }
             true
         }
@@ -179,17 +199,9 @@ class Bubble(private val svc: AccessibilityService, private val look: BubbleSett
         }
     }
 
-    private fun act(g: Gesture) {
-        when (g) {
-            Gesture.DICTATE, Gesture.REVISE, Gesture.TASK -> Session.toggle(g.mode)
-            Gesture.OPEN_APP -> openApp()
-            Gesture.NONE -> {}
-        }
-    }
+    private fun act(g: Gesture) = perform(svc, g)
 
-    private fun openApp() {
-        svc.startActivity(Intent(svc, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-    }
+    private fun openApp() = perform(svc, Gesture.OPEN_APP)
 
     fun show(): Boolean {
         if (shown) return true
@@ -197,6 +209,10 @@ class Bubble(private val svc: AccessibilityService, private val look: BubbleSett
             wm.addView(view, lp)
             shown = true
             Session.stateListeners.add(onState)
+            // It grows in from a little smaller, so it's clear where it came up.
+            view.scaleX = 0.6f
+            view.scaleY = 0.6f
+            scaleTo(1f, 180)
             paint(Session.state)
             true
         } catch (e: Exception) {
@@ -209,6 +225,9 @@ class Bubble(private val svc: AccessibilityService, private val look: BubbleSett
         if (!shown) return
         view.removeCallbacks(single)
         Session.stateListeners.remove(onState)
+        colorAnim?.cancel()
+        scaleAnim?.cancel()
+        pulsing = false
         runCatching { wm.removeView(view) }
         shown = false
     }
@@ -219,14 +238,69 @@ class Bubble(private val svc: AccessibilityService, private val look: BubbleSett
     }
 
     private fun paint(s: Session.State) {
-        val colors = when (s) {
+        val to = when (s) {
             Session.State.IDLE -> if (look.logo) intArrayOf(LOGO_LIGHT, LOGO_DARK) else intArrayOf(GREY, GREY)
             Session.State.STARTING -> intArrayOf(AMBER, AMBER)
             Session.State.LISTENING -> intArrayOf(RED, RED)
             Session.State.FINISHING -> intArrayOf(PURPLE, PURPLE)
         }
-        shape.colors = colors
+        val from = colors
+        colors = to
+        colorAnim?.cancel()
+        if (from == null || !ValueAnimator.areAnimatorsEnabled()) {
+            shape.colors = to
+        } else {
+            val mix = ArgbEvaluator()
+            colorAnim = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 200
+                addUpdateListener { a ->
+                    val f = a.animatedFraction
+                    shape.colors = intArrayOf(mix.evaluate(f, from[0], to[0]) as Int, mix.evaluate(f, from[1], to[1]) as Int)
+                }
+                start()
+            }
+        }
         view.alpha = if (s == Session.State.IDLE) Core.settings.bubble.opacity / 100f else 1f
+        pulse(s == Session.State.LISTENING)
+    }
+
+    private fun scaleTo(target: Float, ms: Long) {
+        scaleAnim?.cancel()
+        scaleAnim = ObjectAnimator.ofPropertyValuesHolder(
+            view,
+            PropertyValuesHolder.ofFloat(View.SCALE_X, target),
+            PropertyValuesHolder.ofFloat(View.SCALE_Y, target),
+        ).setDuration(ms).also { it.start() }
+    }
+
+    /** While it listens, the bubble slowly shrinks and grows back (not with animations off). */
+    private fun pulse(on: Boolean) {
+        if (on == pulsing) return
+        pulsing = on
+        if (!on || !ValueAnimator.areAnimatorsEnabled()) return scaleTo(1f, 150)
+        scaleAnim?.cancel()
+        // From full size, whatever a press or the appearing left it at.
+        scaleAnim = ObjectAnimator.ofPropertyValuesHolder(
+            view,
+            PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 0.86f),
+            PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 0.86f),
+        ).apply {
+            duration = 700
+            repeatCount = ValueAnimator.INFINITE
+            repeatMode = ValueAnimator.REVERSE
+            interpolator = AccelerateDecelerateInterpolator()
+            start()
+        }
+    }
+
+    /** The whole screen in pixels, where the bubble may go. */
+    private fun screenSize(): Pair<Int, Int> {
+        if (Build.VERSION.SDK_INT >= 30) {
+            val b = wm.maximumWindowMetrics.bounds
+            return b.width() to b.height()
+        }
+        val m = svc.resources.displayMetrics
+        return m.widthPixels to m.heightPixels
     }
 }
 

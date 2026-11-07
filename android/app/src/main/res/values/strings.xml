@@ -2,5 +2,7 @@
 <resources>
     <string name="app_name">Mirza</string>
     <string name="typing_service_label">Mirza</string>
+    <string name="button_service_label">Mirza button</string>
+    <string name="button_service_description">Adds Android\'s accessibility button, which starts Mirza. What it starts is set in Mirza, under Bubble and gestures. Mirza itself must be on too. This service reads nothing on the screen.</string>
     <string name="typing_service_description">Shows the Mirza bubble over other apps and types what you dictate into the text field you are in. Mirza reads the focused text field only to insert text at the cursor.</string>
 </resources>

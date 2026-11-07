@@ -129,7 +129,10 @@ fun HomeScreen(steps: List<Step>, a: Actions) {
             },
         ) { a.go(Screen.REVISION) }
         NavRow("Voice tasks", tasksSummary()) { a.go(Screen.TASKS) }
-        NavRow("Bubble and gestures", gestureSummary(s.gestures)) { a.go(Screen.BUBBLE) }
+        NavRow(
+            "Bubble and gestures",
+            (gestureSummary(s.gestures) + " " + triggerSummary(s.gestures, ButtonService.running)).trim(),
+        ) { a.go(Screen.BUBBLE) }
         NavRow(
             "Listening",
             if (s.silenceStopSec > 0) "Stops after ${s.silenceStopSec} seconds of silence" else "Stops when you tap",
@@ -171,6 +174,19 @@ fun gestureSummary(g: Gestures): String {
     return listOf("Tap" to g.tap, "Double tap" to g.doubleTap, "Long press" to g.longPress)
         .filter { it.second != Gesture.NONE }
         .joinToString(". ", postfix = ".") { "${it.first}: ${it.second.say()}" }
+}
+
+/** The accessibility button (when on) and volume down, when set: "Volume down twice: say a task." */
+fun triggerSummary(g: Gestures, button: Boolean): String {
+    fun Gesture.say() = label.replaceFirstChar { it.lowercase() }
+    return listOf(
+        "Accessibility button" to if (button) g.button else Gesture.NONE,
+        "Volume down held" to g.volumeLongPress,
+        "Volume down twice" to g.volumeDoublePress,
+    )
+        .filter { it.second != Gesture.NONE }
+        .joinToString("") { "${it.first}: ${it.second.say()}. " }
+        .trim()
 }
 
 @Composable

@@ -45,7 +45,15 @@ enum class Gesture(val id: String, val label: String) {
     }
 }
 
-data class Gestures(val tap: Gesture, val doubleTap: Gesture, val longPress: Gesture)
+data class Gestures(
+    val tap: Gesture,
+    val doubleTap: Gesture,
+    val longPress: Gesture,
+    /** Android's accessibility button. */
+    val button: Gesture,
+    val volumeLongPress: Gesture,
+    val volumeDoublePress: Gesture,
+)
 
 data class RevisionSettings(
     /** "" when off. */
@@ -131,6 +139,9 @@ data class Settings(
                     tap = Gesture.of(gestures.getString("tap")),
                     doubleTap = Gesture.of(gestures.getString("double_tap")),
                     longPress = Gesture.of(gestures.getString("long_press")),
+                    button = Gesture.of(gestures.getString("button")),
+                    volumeLongPress = Gesture.of(gestures.getString("volume_long_press")),
+                    volumeDoublePress = Gesture.of(gestures.getString("volume_double_press")),
                 ),
                 speech = SPEECH_SERVICES.associateWith { id ->
                     val p = providers.getJSONObject(id)
