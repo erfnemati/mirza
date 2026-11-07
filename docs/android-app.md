@@ -131,11 +131,12 @@ text come from the core (`TaskOutcome`); showing it and its buttons is Kotlin's 
   use the calendar's default reminders; Mirza has no alarm or reminder of its own.
 - **One queue.** The lock-screen queue is the core's own queue with a hold flag: while the phone
   is locked (`KeyguardManager.isKeyguardLocked`), Kotlin calls `capture_held(text)`, which stores
-  only the transcript and sends nothing to the AI or Google. After unlock, one notification lists
-  the held tasks; tapping it opens the panel, where `confirm(id)` then `process(id)` saves one,
-  `edit` also releases it, and `undo` drops it. Times are read from the moment the task was
-  said, so "tomorrow" stays the day after it was said even if it is confirmed later; the panel
-  shows the resolved date. Recognition needs the internet, so with no connection nothing is
+  only the transcript and sends nothing to the AI or Google. After unlock, one notification says
+  how many tasks are held; tapping it goes through them one by one, a screen for each with
+  Confirm (`confirm(id)` then `process(id)`), Edit (`edit`, which also releases it) and Drop
+  (`undo`). There is no "Confirm all" (Erfan's decision of 2026-11-07). Times are read from the
+  moment the task was said, so "tomorrow" stays the day after it was said even if it is
+  confirmed later; each screen shows the resolved date. Recognition needs the internet, so with no connection nothing is
   recorded. `TaskConfig.held_limit` (1 to 10) caps the queue; when it is full `capture_held`
   refuses with a plain message (Erfan's decision of 2026-11-07).
 - **One retry job:** a WorkManager job with a network constraint, first run after
@@ -202,7 +203,7 @@ created for `dev.erfnemati.mirza`):
 
 Answered by Erfan on 2026-11-06: no central server, the signing key as above, Google sign-in
 through Play services. On 2026-11-07: a full lock-screen queue refuses new tasks with a plain
-message. Still to ask: confirm held tasks one by one or all at once?
+message, and after unlocking the held tasks are confirmed one by one, with no "Confirm all".
 
 ## Risks
 
