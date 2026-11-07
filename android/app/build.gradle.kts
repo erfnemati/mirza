@@ -42,6 +42,9 @@ android {
         targetSdk = 36
         versionCode = mirzaVersionCode
         versionName = mirzaVersion
+        // Only the ABIs the Rust core is built for (gradle.properties). JNA brings its own library
+        // for more, and a phone with another ABI would install the app and then fail to load the core.
+        ndk { abiFilters += providers.gradleProperty("mirza.abis").get().split(",").map { it.trim() } }
     }
 
     signingConfigs {

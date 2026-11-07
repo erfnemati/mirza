@@ -27,6 +27,7 @@ Agreed in November 2026. Each step is one or more PRs into `develop`.
 5. **Android app.** Kotlin app over the Rust core: floating bubble (size, logo, opacity), gestures
    (tap, double tap, long press) mapped to actions, dictation, AI revision and voice tasks. No
    alarm of its own: a task with a time also becomes a Google Calendar event, whose reminder
-   rings. Plan: [android-app.md](android-app.md).
+   rings. Plan: [android-app.md](android-app.md); install guide:
+   [install-android.md](install-android.md).
 6. **Microsoft To Do** (full reminders, categories and priority through Microsoft Graph).
 7. **iPhone**: a custom keyboard and a Shortcuts action over the same Rust core.

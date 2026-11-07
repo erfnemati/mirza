@@ -4,7 +4,7 @@
 
 <p align="center">
 Press a shortcut, speak, and your words are typed wherever your cursor is.<br>
-Open-source speech-to-text dictation for <b>Linux, Windows and macOS</b>.
+Open-source speech-to-text dictation for <b>Linux, Windows, macOS and Android</b>.
 </p>
 
 <p align="center">
@@ -35,7 +35,8 @@ this month.
 - **You write in more than one language.** Mix Persian (Farsi) and English in
   the same sentence; Mirza types both correctly, half-spaces included.
 - **You want dictation that works everywhere.** Not just in one app or browser:
-  Wayland and X11 on Linux (KDE Plasma, GNOME), Windows, macOS.
+  Wayland and X11 on Linux (KDE Plasma, GNOME), Windows, macOS, and Android
+  phones.
 
 It is an open-source alternative to tools like Wispr Flow, Superwhisper, and
 the built-in voice typing of Windows and macOS.
@@ -100,6 +101,14 @@ Mirza to Applications. The first time you open it:
 2. Allow **Microphone** when asked.
 3. Allow **Accessibility**, so Mirza can see its shortcut and type.
 
+### Android
+
+Download `Mirza-<version>-android.apk` on the phone (Android 10 or newer) and
+open it. Mirza isn't in the Play Store, so Play Protect may warn you, and
+Android may call its accessibility switch a "restricted setting" until you
+allow it. The [Android install guide](docs/install-android.md) walks through
+both, and through the extra steps on Xiaomi phones.
+
 ## Getting started
 
 1. Click the Mirza icon in the tray to open the settings.
@@ -131,6 +140,8 @@ sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev   # Debian/Ubun
 cargo build --release -p mirza -p mirza-panel
 scripts/install-linux.sh    # optional: install for your user
 ```
+
+The Android app is in `android/`; see [docs/android-app.md](docs/android-app.md).
 
 Contributions are welcome. See [docs/testing.md](docs/testing.md) for a manual
 test checklist.
