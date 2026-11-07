@@ -7,9 +7,9 @@ plugins {
 }
 
 // `-Pmirza.rustProfile=dev` for faster native builds while working on Rust,
-// `-Pmirza.abis=arm64-v8a` to build for phones only (x86_64 is the emulator).
+// `-Pmirza.abis=arm64-v8a` to build for phones only (the default is in gradle.properties).
 val rustProfile = providers.gradleProperty("mirza.rustProfile").getOrElse("release")
-val rustAbis = providers.gradleProperty("mirza.abis").getOrElse("arm64-v8a,x86_64").split(",").map { it.trim() }
+val rustAbis = providers.gradleProperty("mirza.abis").get().split(",").map { it.trim() }
 
 android {
     namespace = "dev.erfnemati.mirza.core"
