@@ -128,6 +128,8 @@ pub struct Tasks {
     pub timed_due_date: bool,
     /// Other names for a list, by Google Tasks list id, e.g. "office, Acme".
     pub list_hints: BTreeMap<String, String>,
+    /// Your own rules for the AI that reads tasks, e.g. "Write the title in English."
+    pub instructions: String,
     /// How many tasks said on the lock screen may wait for the phone to be unlocked, 1 to 10.
     pub held_limit: u32,
 }
@@ -142,6 +144,7 @@ impl Default for Tasks {
             event_minutes: t.event_minutes,
             timed_due_date: t.timed_due_date,
             list_hints: BTreeMap::new(),
+            instructions: String::new(),
             held_limit: mirza_core::tasks::HELD_MAX as u32,
         }
     }

@@ -158,6 +158,11 @@ The AI turns what you said into:
   [Lists](#lists)), fits what you said;
 - a **day** and a **time**, and how long it takes if you said so.
 
+To change how tasks are read, write your own rules under **Your own rules** on the Voice tasks
+page, for example "Write the title in English." or "Put the name of the person in the note."
+They come after Mirza's rules and win over them. The rules you wrote for AI revision don't
+apply to tasks. Use **Try it** to see the effect before saying a real task.
+
 Days like "tomorrow", "next Monday" or «پنج‌شنبه» count from when you said the task, not from
 when it reached Google. Jalali dates («۱۵ آذر») are converted to Gregorian by Mirza itself, not
 by the AI. When something could be read two ways (3 o'clock in the morning or the afternoon,
@@ -235,6 +240,7 @@ google_client_id = ""    # set by pasting the client file; the secret is kept wi
 default_list = ""        # list id for tasks that fit no list; "" is your Google default list
 event_minutes = 30       # event length when you don't say one
 timed_due_date = true    # a task with a time is also due that day
+instructions = ""        # your own rules for the AI, e.g. "Write the title in English."
 
 [tasks.list_hints]       # other names for a list, by list id
 "MDk3NTE3NjQ5NjQ5NjQ4NjU4MzQ6MDow" = "office, Acme"
@@ -272,6 +278,9 @@ All of it goes through the proxy in **Settings > General**, like everything else
   in again and tick both boxes.
 - **"This is a Web application client"**: create a **Desktop app** client instead
   ([step 6](#6-create-the-client)).
+- **"Error 400: invalid_request" in the browser when signing in on the desktop**: the client
+  pasted under **Google client** is the Android one. Remove it and paste the **Desktop app**
+  client's file, the one with a client secret ([step 6](#6-create-the-client)).
 - **"Couldn't reach Google"**: Google may be blocked where you are. Set a proxy in **Settings >
   General**.
 - **Tasks land in the wrong list**: give the right list other names under **Lists**.

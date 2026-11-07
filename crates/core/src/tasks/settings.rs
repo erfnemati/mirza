@@ -29,6 +29,9 @@ pub struct TaskSettings {
     pub timed_due_date: bool,
     /// Other names for a list, by Google Tasks list id, e.g. "office, Acme".
     pub list_hints: BTreeMap<String, String>,
+    /// Your own rules for the AI that reads tasks, e.g. "Write the title in
+    /// English." They come after Mirza's own and win over them.
+    pub instructions: String,
 }
 
 impl Default for TaskSettings {
@@ -41,6 +44,7 @@ impl Default for TaskSettings {
             event_minutes: 30,
             timed_due_date: true,
             list_hints: BTreeMap::new(),
+            instructions: String::new(),
         }
     }
 }

@@ -266,7 +266,8 @@ impl Book {
         let ai = setup.ai.as_ref().ok_or_else(|| setup.ai_problem.clone())?;
         let lists = self.lists(setup, false).await.unwrap_or_default();
         let said = Said::now().zoned();
-        let req = parse::request(text, &lists, &setup.settings.list_hints, &setup.terms, &said);
+        let req =
+            parse::request(text, &lists, &setup.settings.list_hints, &setup.terms, &setup.settings.instructions, &said);
         let timeout = Duration::from_secs(setup.settings.timeout_sec.max(5));
         parse::parse(ai, &req, &lists, setup.default_list(), &said, timeout).await.map_err(|e| e.to_string())
     }
@@ -329,7 +330,14 @@ impl Book {
             None => match &setup.ai {
                 Some(ai) => {
                     let said = e.said.zoned();
-                    let req = parse::request(&e.text, &lists, &setup.settings.list_hints, &setup.terms, &said);
+                    let req = parse::request(
+                        &e.text,
+                        &lists,
+                        &setup.settings.list_hints,
+                        &setup.terms,
+                        &setup.settings.instructions,
+                        &said,
+                    );
                     let timeout = Duration::from_secs(setup.settings.timeout_sec.max(5));
                     match parse::parse(ai, &req, &lists, default, &said, timeout).await {
                         Ok(d) => {

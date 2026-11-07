@@ -227,7 +227,7 @@ async fn parse_cmd(mut args: impl Iterator<Item = String>) {
     };
     for line in lines {
         let now = now.clone().unwrap_or_else(|| mirza_core::tasks::Said::now().zoned());
-        let req = parse::request(&line, &lists, &cfg.tasks.list_hints, &terms, &now);
+        let req = parse::request(&line, &lists, &cfg.tasks.list_hints, &terms, &cfg.tasks.instructions, &now);
         let started = Instant::now();
         let r = parse::parse(&client, &req, &lists, "", &now, timeout).await;
         let ms = started.elapsed().as_millis();

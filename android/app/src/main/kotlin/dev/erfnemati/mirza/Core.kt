@@ -76,6 +76,8 @@ data class TaskSettings(
     val timedDueDate: Boolean,
     /** Other names per list id. */
     val listHints: Map<String, String>,
+    /** Your own rules for the AI that reads tasks. */
+    val instructions: String,
     /** How many tasks said on the lock screen may wait. */
     val heldLimit: Int,
 )
@@ -174,6 +176,7 @@ data class Settings(
                     eventMinutes = tasks.getInt("event_minutes"),
                     timedDueDate = tasks.getBoolean("timed_due_date"),
                     listHints = hints.keys().asSequence().associateWith { hints.getString(it) },
+                    instructions = tasks.getString("instructions"),
                     heldLimit = tasks.getInt("held_limit"),
                 ),
             )
