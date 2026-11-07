@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -41,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -48,9 +49,21 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import dev.erfnemati.mirza.core.SoundKind
 import dev.erfnemati.mirza.core.coreVersion
 
-enum class Screen(val title: String) { HOME("Mirza"), SPEECH("Speech service"), GENERAL("General"), ABOUT("About") }
+enum class Screen(val title: String) {
+    HOME("Mirza"),
+    SPEECH("Speech service"),
+    REVISION("AI revision"),
+    BUBBLE("Bubble and gestures"),
+    LISTENING("Listening"),
+    TYPING("Typing"),
+    HISTORY("Recent text"),
+    USAGE("Usage"),
+    GENERAL("General"),
+    ABOUT("About"),
+}
 
 /** What the screens ask the activity to do. */
 interface Actions {
@@ -59,6 +72,7 @@ interface Actions {
     fun appInfo()
     fun open(url: String)
     fun go(screen: Screen)
+    fun notificationSettings()
 }
 
 @Composable
@@ -89,7 +103,7 @@ fun HomeScreen(steps: List<Step>, a: Actions) {
     }
 
     Section(null) {
-        SwitchRow("Show the bubble", "Over every app. Drag it anywhere; a long press opens Mirza.", s.bubbleShow) {
+        SwitchRow("Show the bubble", "Over every app. Drag it anywhere.", s.bubbleShow) {
             Core.set("bubble.show", it)
         }
     }
@@ -100,24 +114,69 @@ fun HomeScreen(steps: List<Step>, a: Actions) {
             "Speech service",
             serviceName(service) + if (Core.keySet(service)) "" else ", no API key yet",
         ) { a.go(Screen.SPEECH) }
-        NavRow("General", "Proxy, sounds, updates") { a.go(Screen.GENERAL) }
+        val ai = aiProvider(s.revision.provider)
+        NavRow(
+            "AI revision",
+            when {
+                ai == null -> "Off"
+                !ai.optionalKey && !Core.keySet(ai.id) -> "${ai.name}, no API key yet"
+                else -> ai.name
+            },
+        ) { a.go(Screen.REVISION) }
+        NavRow("Bubble and gestures", gestureSummary(s.gestures)) { a.go(Screen.BUBBLE) }
+        NavRow(
+            "Listening",
+            if (s.silenceStopSec > 0) "Stops after ${s.silenceStopSec} seconds of silence" else "Stops when you tap",
+        ) { a.go(Screen.LISTENING) }
+        NavRow("Typing", "Persian letters, clipboard") { a.go(Screen.TYPING) }
+    }
+
+    Section("More") {
+        NavRow(
+            "Recent text",
+            when (val n = History.items.size) {
+                0 -> if (s.historySize == 0) "Off" else "Nothing yet"
+                1 -> "1 text"
+                else -> "$n texts"
+            },
+        ) { a.go(Screen.HISTORY) }
+        NavRow("Usage", "What ${serviceName(s.activeProvider)} has cost") { a.go(Screen.USAGE) }
+        NavRow("General", "Proxy, sounds, notifications, updates") { a.go(Screen.GENERAL) }
         NavRow("About", "Version ${BuildConfig.VERSION_NAME}, log") { a.go(Screen.ABOUT) }
     }
+}
+
+/** "Tap: dictate. Double tap: dictate and revise with AI." */
+fun gestureSummary(g: Gestures): String {
+    fun Gesture.say() = label.replaceFirstChar { it.lowercase() }
+    return listOf("Tap" to g.tap, "Double tap" to g.doubleTap, "Long press" to g.longPress)
+        .filter { it.second != Gesture.NONE }
+        .joinToString(". ", postfix = ".") { "${it.first}: ${it.second.say()}" }
 }
 
 @Composable
 private fun StatusCard(ready: Boolean) {
     val state = Session.state
+    val g = Core.settings.gestures
     val (title, detail) = when {
         state == Session.State.LISTENING -> "Listening" to "Tap the bubble again to stop."
+        Session.revisingNow -> "Revising" to "The AI is cleaning up the text. Tap the bubble to type it as it was said."
         state != Session.State.IDLE -> "Working" to "Finishing the last words."
-        ready -> "Ready" to "Tap into any text field, then tap the bubble. Tap it again to stop."
+        ready -> "Ready" to "Tap into any text field, then use the bubble. ${gestureSummary(g)}"
         else -> "Almost ready" to "Finish the steps below, then the bubble shows over every app."
     }
-    val circle by animateColorAsState(
+    val top by animateColorAsState(
         when {
             state == Session.State.LISTENING -> Color(0xFFD32F2F)
-            ready -> MaterialTheme.colorScheme.primary
+            ready -> LogoLight
+            else -> MaterialTheme.colorScheme.outline
+        },
+        label = "status",
+    )
+    val bottom by animateColorAsState(
+        when {
+            state == Session.State.LISTENING -> Color(0xFFD32F2F)
+            ready -> LogoDark
             else -> MaterialTheme.colorScheme.outline
         },
         label = "status",
@@ -127,11 +186,14 @@ private fun StatusCard(ready: Boolean) {
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.size(56.dp).clip(CircleShape).background(circle),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(painterResource(R.drawable.ic_mic), contentDescription = null, tint = Color.White)
+            // The app's logo: a teal rounded square with a white microphone.
+            Box(Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)).background(Brush.linearGradient(listOf(top, bottom)))) {
+                Icon(
+                    painterResource(R.drawable.ic_logo_mic),
+                    contentDescription = null,
+                    tint = Color.Unspecified,
+                    modifier = Modifier.size(56.dp),
+                )
             }
             Column(Modifier.padding(start = 16.dp)) {
                 Text(title, style = MaterialTheme.typography.headlineSmall)
@@ -243,7 +305,7 @@ private fun splitList(s: String) = s.split(',', '،', '\n').map { it.trim() }.fi
 
 /** The key is never shown once saved; typing a new one replaces it. */
 @Composable
-private fun KeyField(service: String) {
+fun KeyField(service: String, name: String = serviceName(service)) {
     val saved = Core.keySet(service)
     var text by remember(service) { mutableStateOf("") }
     var error by remember(service) { mutableStateOf<String?>(null) }
@@ -260,7 +322,7 @@ private fun KeyField(service: String) {
             text = it
             error = null
         },
-        label = { Text(if (saved) "Saved. Paste a new key to replace it." else "Paste your ${serviceName(service)} API key") },
+        label = { Text(if (saved) "Saved. Paste a new key to replace it." else "Paste your $name API key") },
         singleLine = true,
         visualTransformation = PasswordVisualTransformation(),
         keyboardOptions = KeyboardOptions(
@@ -282,7 +344,7 @@ private fun KeyField(service: String) {
 }
 
 @Composable
-fun GeneralScreen() {
+fun GeneralScreen(a: Actions) {
     val s = Core.settings
     Section("Network") {
         TextSetting(
@@ -294,6 +356,19 @@ fun GeneralScreen() {
     }
     Section(null) {
         SwitchRow("Sounds", "A short sound when dictation starts and stops, and on errors.", s.sounds) { Core.set("sounds", it) }
+        if (s.sounds) {
+            SliderSetting("Volume", s.soundVolume, 10..100, 10, { "$it%" }) {
+                Core.set("sound_volume", it)
+                Sounds.play(SoundKind.START, test = true)
+            }
+        }
+        ListItem(
+            headlineContent = { Text("Notifications") },
+            supportingContent = { Text("Mirza shows one only while it listens, with a Stop button.") },
+            trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null) },
+            colors = clearItem,
+            modifier = Modifier.clickable(onClick = a::notificationSettings),
+        )
         SwitchRow(
             "Check for updates",
             "Once a day when you open Mirza, it asks GitHub for the latest version number. Nothing about you or what you say is sent.",

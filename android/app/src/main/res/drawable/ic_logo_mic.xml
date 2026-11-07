@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The microphone of Mirza's logo (assets/icons/io.github.erfnemati.Mirza.svg), in the logo's own
+     coordinates, so it sits where it does on the logo's rounded square. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="256"
+    android:viewportHeight="256">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M93,69 A35,35 0 0 1 163,69 L163,117 A35,35 0 0 1 93,117 Z" />
+    <path
+        android:strokeColor="#0F766E"
+        android:strokeAlpha="0.55"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:pathData="M111,78 L145,78 M111,98 L145,98 M111,118 L145,118" />
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="17"
+        android:strokeLineCap="round"
+        android:pathData="M64,116 A64,64 0 0 0 192,116 M128,182 L128,212 M94,214 L162,214" />
+</vector>

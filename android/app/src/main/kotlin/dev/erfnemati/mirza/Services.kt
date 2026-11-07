@@ -90,7 +90,10 @@ class MicService : Service() {
     }
 }
 
-/** The desktop's start, stop and error sounds, made by the core and played through SoundPool. */
+/**
+ * The desktop's start, stop and error sounds, made by the core at full volume and played through
+ * SoundPool at the volume setting, squared like the desktop's, since loudness is heard on a log scale.
+ */
 object Sounds {
     private var pool: SoundPool? = null
     private val ids = mutableMapOf<SoundKind, Int>()
@@ -109,17 +112,20 @@ object Sounds {
         val dir = File(MirzaApp.app.cacheDir, "sounds").apply { mkdirs() }
         for (kind in SoundKind.entries) {
             val f = File(dir, "${kind.name.lowercase()}.wav")
-            f.writeBytes(soundWav(kind, 50u))
+            f.writeBytes(soundWav(kind, 100u))
             ids[kind] = p.load(f.path, 1)
         }
         pool = p
         return p
     }
 
-    fun play(kind: SoundKind) {
-        if (!Core.settings.sounds) return
+    /** Plays `kind` if sounds are on, or always with `test` (the volume setting). */
+    fun play(kind: SoundKind, test: Boolean = false) {
+        val s = Core.settings
+        if (!s.sounds && !test) return
         val p = load()
-        ids[kind]?.let { p.play(it, 1f, 1f, 1, 0, 1f) }
+        val v = s.soundVolume / 100f
+        ids[kind]?.let { p.play(it, v * v, v * v, 1, 0, 1f) }
     }
 
     /** Loads the sounds ahead, so the first one isn't late. */
