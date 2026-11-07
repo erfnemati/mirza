@@ -137,7 +137,7 @@ text come from the core (`TaskOutcome`); showing it and its buttons is Kotlin's 
   said, so "tomorrow" stays the day after it was said even if it is confirmed later; the panel
   shows the resolved date. Recognition needs the internet, so with no connection nothing is
   recorded. `TaskConfig.held_limit` (1 to 10) caps the queue; when it is full `capture_held`
-  refuses with a plain message (to confirm with Erfan).
+  refuses with a plain message (Erfan's decision of 2026-11-07).
 - **One retry job:** a WorkManager job with a network constraint, first run after
   `next_due_ms`, that gets a token and calls `process_due` (held tasks are skipped).
 - Sign-in, the Tasks screen and the task panel are Kotlin and can be built against a stub before
@@ -201,8 +201,8 @@ created for `dev.erfnemati.mirza`):
 ## Decisions
 
 Answered by Erfan on 2026-11-06: no central server, the signing key as above, Google sign-in
-through Play services. Still to ask when PR 3 starts: does a full lock-screen queue refuse new
-tasks with a message? Confirm queued tasks one by one or all at once?
+through Play services. On 2026-11-07: a full lock-screen queue refuses new tasks with a plain
+message. Still to ask: confirm held tasks one by one or all at once?
 
 ## Risks
 
