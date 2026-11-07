@@ -8,11 +8,15 @@
 //! builds and its tests run on the desktop too.
 
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
+use mirza_core::ai::Kind;
+use mirza_core::ai::revise::{self, Hints};
 use mirza_core::audio::sound::{self, Sound};
 use mirza_core::config::Providers;
 use mirza_core::normalize::persian_letters;
 use mirza_core::providers::{self, StreamRequest, SttEvent};
+use mirza_core::usage;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -117,12 +121,16 @@ impl Dictation {
 
 impl Dictation {
     fn start(req: StreamRequest, listener: Box<dyn DictationListener>) -> Arc<Self> {
+        Self::start_with(req, listener, true)
+    }
+
+    fn start_with(req: StreamRequest, listener: Box<dyn DictationListener>, persian: bool) -> Arc<Self> {
         let (audio_tx, audio_rx) = mpsc::channel(AUDIO_QUEUE);
         let (events_tx, events_rx) = mpsc::unbounded_channel();
         let rt = runtime();
         let _ctx = rt.enter();
         let stream = providers::start(req, audio_rx, events_tx);
-        rt.spawn(forward(events_rx, listener));
+        rt.spawn(forward(events_rx, listener, persian));
         Arc::new(Self { audio: Mutex::new(Some(audio_tx)), stream: Mutex::new(Some(stream)) })
     }
 }
@@ -153,6 +161,28 @@ pub struct Release {
     pub version: String,
     /// Its page on GitHub, with the download.
     pub url: String,
+}
+
+/// The text to type after AI revision.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct RevisedText {
+    pub text: String,
+    /// What the speech service heard.
+    pub raw: String,
+    /// Whether the AI changed it; when not, `note` says why.
+    pub revised: bool,
+    pub note: Option<String>,
+}
+
+/// What the speech service has cost, from its own records (Soniox only).
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct UsageInfo {
+    pub today: f64,
+    pub month: f64,
+    pub month_minutes: f64,
+    pub requests: u64,
+    /// Spent since the saved credit's date, when one is saved.
+    pub since_credit: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -215,7 +245,51 @@ impl MirzaCore {
         let api_key = self.store.key(&provider).ok_or_else(|| settings::missing_key(&provider))?;
         let proxy = mirza_core::net::resolve_proxy(&cfg.proxy).map_err(|e| MobileError::Settings(e.to_string()))?;
         let settings = cfg.providers.get(&provider).cloned().unwrap_or_else(|| cfg.providers.soniox.clone());
-        Ok(Dictation::start(StreamRequest { provider, api_key, settings, proxy }, listener))
+        let req = StreamRequest { provider, api_key, settings, proxy };
+        Ok(Dictation::start_with(req, listener, cfg.typing.persian_letters))
+    }
+
+    /// Revises dictated text with the AI provider in the settings, within its time limit. Never
+    /// fails: whatever goes wrong, the original comes back with the reason in `note`. Blocks, so
+    /// call it off the main thread.
+    pub fn revise(&self, text: String) -> RevisedText {
+        let raw = text.trim().to_owned();
+        let unrevised =
+            |note: String| RevisedText { text: raw.clone(), raw: raw.clone(), revised: false, note: Some(note) };
+        let cfg = self.config();
+        let client = match self.ai_client(&cfg, cfg.revision.provider.trim()) {
+            Ok(c) => c,
+            Err(e) => return unrevised(e.to_string()),
+        };
+        let (languages, terms) =
+            cfg.providers.get(&cfg.active_provider).map(|p| (p.languages.clone(), p.terms.clone())).unwrap_or_default();
+        let hints = Hints::new(&cfg.revision, languages, terms);
+        let timeout = revise::timeout_for(&raw, cfg.revision.timeout_sec);
+        let r = runtime().block_on(revise::revise_or_raw(&client, &raw, &hints, timeout));
+        RevisedText { text: r.text, raw: r.raw, revised: r.revised, note: r.note }
+    }
+
+    /// The models an AI provider offers, for the model picker. Blocks.
+    pub fn ai_models(&self, provider: String) -> Result<Vec<String>, MobileError> {
+        let cfg = self.config();
+        let client = self.ai_client(&cfg, &provider)?;
+        runtime().block_on(client.models()).map_err(|e| MobileError::Network(e.to_string()))
+    }
+
+    /// What Soniox has cost this month and today, and since the saved credit's date. Blocks.
+    pub fn soniox_usage(&self) -> Result<UsageInfo, MobileError> {
+        let cfg = self.config();
+        let key = self.store.key("soniox").ok_or_else(|| settings::missing_key("soniox"))?;
+        let proxy = mirza_core::net::resolve_proxy(&cfg.proxy).map_err(|e| MobileError::Settings(e.to_string()))?;
+        let since = cfg.credit.get("soniox").filter(|c| c.amount > 0.0).and_then(|c| usage::Date::parse(&c.since));
+        let u = runtime().block_on(usage::soniox(&key, proxy.as_ref(), since)).map_err(MobileError::Network)?;
+        Ok(UsageInfo {
+            today: u.today,
+            month: u.month,
+            month_minutes: u.month_minutes,
+            requests: u.requests,
+            since_credit: u.since_credit,
+        })
     }
 
     /// Asks GitHub for the latest release, through the proxy setting; None when this app is the
@@ -232,6 +306,22 @@ impl MirzaCore {
 impl MirzaCore {
     fn config(&self) -> MobileConfig {
         self.config.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// A client for an AI provider with the saved settings and key.
+    fn ai_client(&self, cfg: &MobileConfig, provider: &str) -> Result<mirza_core::ai::Client, MobileError> {
+        let kind = match provider {
+            "" => return Err(MobileError::Settings("AI revision is off. Choose a provider in AI revision.".into())),
+            p => Kind::parse(p).ok_or_else(|| MobileError::Settings(format!("Unknown AI provider {p:?}.")))?,
+        };
+        let key = self.store.key(kind.id());
+        if kind.needs_key() && key.is_none() {
+            return Err(MobileError::Settings(settings::missing_ai_key(kind)));
+        }
+        let proxy = mirza_core::net::resolve_proxy(&cfg.proxy).map_err(|e| MobileError::Settings(e.to_string()))?;
+        // The time limit is applied per text, by its length.
+        mirza_core::ai::Client::new(kind, cfg.ai.get(kind), key, proxy.as_ref(), Duration::from_secs(600))
+            .map_err(|e| MobileError::Settings(e.to_string()))
     }
 }
 
@@ -253,11 +343,12 @@ pub fn core_version() -> String {
 }
 
 /// Passes the provider's events to the listener until the stream ends.
-async fn forward(mut events: mpsc::UnboundedReceiver<SttEvent>, listener: Box<dyn DictationListener>) {
+async fn forward(mut events: mpsc::UnboundedReceiver<SttEvent>, listener: Box<dyn DictationListener>, persian: bool) {
+    let fix = |t: String| if persian { persian_letters(&t) } else { t };
     while let Some(ev) = events.recv().await {
         match ev {
-            SttEvent::Final(text) => listener.on_text(persian_letters(&text)),
-            SttEvent::Partial(text) => listener.on_partial(persian_letters(&text)),
+            SttEvent::Final(text) => listener.on_text(fix(text)),
+            SttEvent::Partial(text) => listener.on_partial(fix(text)),
             SttEvent::Heard => {}
             SttEvent::Finished => return listener.on_finished(),
             SttEvent::Error(message) => return listener.on_error(message),
@@ -322,7 +413,7 @@ mod tests {
         etx.send(SttEvent::Partial(" بعدي".into())).unwrap();
         etx.send(SttEvent::Finished).unwrap();
         etx.send(SttEvent::Final("after the end".into())).unwrap();
-        forward(erx, Box::new(Recorder(tx))).await;
+        forward(erx, Box::new(Recorder(tx)), true).await;
         let heard: Vec<Heard> = rx.try_iter().collect();
         assert_eq!(
             heard,
@@ -370,6 +461,39 @@ mod tests {
         assert!(matches!(rx.recv_timeout(Duration::from_secs(30)).unwrap(), Heard::Error(_)));
         d.cancel();
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn revision_without_a_provider_or_key_gives_the_text_back() {
+        let dir = std::env::temp_dir().join(format!("mirza-mobile-revise-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let core = MirzaCore::new(dir.to_string_lossy().into_owned());
+        let r = core.revise("  خب سلام  ".into());
+        assert_eq!((r.text.as_str(), r.revised), ("خب سلام", false));
+        assert!(r.note.unwrap().contains("AI revision is off"));
+        core.set_value("revision.provider".into(), "\"claude\"".into()).unwrap();
+        let r = core.revise("hello".into());
+        assert_eq!(r.text, "hello");
+        assert!(r.note.unwrap().contains("Claude API key"));
+        assert!(core.ai_models("gemini".into()).unwrap_err().to_string().contains("Gemini API key"));
+        assert!(core.soniox_usage().unwrap_err().to_string().contains("Soniox API key"));
+        // A local server needs no key; nothing answers on this port.
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        core.set_value("ai.local.base_url".into(), format!("\"http://127.0.0.1:{port}/v1\"")).unwrap();
+        core.set_value("revision.provider".into(), "\"local\"".into()).unwrap();
+        let r = core.revise("hello".into());
+        assert!(!r.revised && r.text == "hello" && r.note.is_some());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn persian_letters_can_be_left_alone() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (etx, erx) = mpsc::unbounded_channel();
+        etx.send(SttEvent::Final("كتاب".into())).unwrap();
+        etx.send(SttEvent::Finished).unwrap();
+        forward(erx, Box::new(Recorder(tx)), false).await;
+        assert_eq!(rx.try_iter().next(), Some(Heard::Text("كتاب".into())));
     }
 
     #[test]
