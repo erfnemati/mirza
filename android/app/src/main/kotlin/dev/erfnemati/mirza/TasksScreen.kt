@@ -298,6 +298,14 @@ private fun AiSection(t: TaskSettings, s: Settings, changes: Int) {
             val problem = remember(changes, Core.keysVersion) { VoiceTasks.book()?.aiProblem().orEmpty() }
             if (problem.isNotEmpty()) Box(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) { Notice(problem) }
         }
+        if (p != null) {
+            TextSetting(
+                "Your own rules",
+                t.instructions,
+                "For the AI that reads your tasks, added to Mirza's rules and winning over them. AI revision's rules don't apply here. For example: Write the title in English.",
+                singleLine = false,
+            ) { Core.set("tasks.instructions", it.trim().ifEmpty { null }) }
+        }
         NumberSetting(
             "Time limit in seconds",
             t.timeoutSec.toInt(),

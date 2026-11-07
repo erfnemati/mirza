@@ -996,6 +996,9 @@ function aiGroups(t) {
   });
   const model = a && (state.cfg.ai[a.id].model || (a.models[0] ? a.models[0] : "the server's first model"));
   const missingKey = a && !a.optionalKey && !(state.keys[a.id] || {}).present;
+  const rules = h("textarea", { class: "input", rows: 3, placeholder: "For example: Write the title in English.", value: tc.instructions || "", attrs: { dir: "auto", "aria-label": "Your own rules for tasks" } });
+  // Empty removes the setting, so older versions can still read the config.
+  rules.addEventListener("change", () => save("tasks.instructions", rules.value.trim() || null));
   return [
     group(
       row({
@@ -1013,6 +1016,14 @@ function aiGroups(t) {
           })
         : null,
       a && !missingKey && !t.ai && t.ai_problem ? h("div", { class: "row" }, notice(t.ai_problem, { error: true })) : null,
+      a
+        ? row({
+            label: "Your own rules",
+            desc: "For the AI that reads your tasks, added to Mirza's rules and winning over them. AI revision's rules don't apply here.",
+            stack: true,
+            control: rules,
+          })
+        : null,
       row({
         label: "Time limit",
         desc: "If the AI hasn't answered by then, the task is saved as you said it.",

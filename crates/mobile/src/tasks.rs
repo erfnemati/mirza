@@ -193,6 +193,7 @@ fn setup(cfg: &MobileConfig, store: &settings::Store, tokens: Arc<dyn TokenProvi
         event_minutes: t.event_minutes,
         timed_due_date: t.timed_due_date,
         list_hints: t.list_hints.clone(),
+        instructions: t.instructions.clone(),
         ..TaskSettings::default()
     };
     let timeout = Duration::from_secs(t.timeout_sec.max(5));

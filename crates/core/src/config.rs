@@ -551,6 +551,7 @@ pub const TEMPLATE: &str = r#"# Mirza settings. Every key is optional; the value
 # default_list = ""               # Google Tasks list id for tasks that fit no list ("" for your default list)
 # event_minutes = 30              # event length when you don't say one
 # timed_due_date = true           # a task with a time also gets that day as its due date
+# instructions = ""               # your own rules for reading tasks, e.g. "Write the title in English."
 #
 # [tasks.list_hints]              # other names for a list, by list id (easier in the settings window)
 # "MDE2NjQ..." = "office, Acme"
