@@ -40,8 +40,9 @@ jobs, a central server, Play Store, iPhone.
   notification. Each dictation starts a short microphone foreground service (trial mode B). The
   overlay bubble and mic modes A, C and D are dropped.
 - **Battery:** nothing runs between dictations except the accessibility service, which only gets
-  focus and window events. No alarms, no polling, no wake locks, no permanent foreground service.
-  The only background job is one network-constrained retry for unsaved tasks.
+  focus and window events (and key presses, only while a volume-down gesture is set). No alarms,
+  no polling, no wake locks, no permanent foreground service. The only background job is one
+  network-constrained retry for unsaved tasks.
 - **UI:** Jetpack Compose with Material 3 for the settings and the small task panel, so animations
   and dark mode come with the toolkit. The bubble stays a plain view in the overlay window with its
   own short animations (listening pulse, state colors, drag). The first commit of PR 1 proves that
@@ -77,7 +78,7 @@ Screens, from the desktop panel:
 |---|---|
 | Setup | A checklist that shows what is missing and opens the right Android screen: microphone, notifications, accessibility (with the restricted-settings and Play Protect steps), Xiaomi Autostart and Battery saver, turning the trial's service off. The screen stays out of recents (Xiaomi force-stops an app swiped away there). Shown on its own whenever typing is off. |
 | Speech | Service (Soniox first; OpenAI and ElevenLabs if the core's providers work on Android), key, model, languages, "only these languages", words to expect. |
-| Bubble and gestures | Size, opacity, logo, "move it back to the start"; what tap, double tap and long press do; show on the lock screen or not. |
+| Bubble and gestures | Size, opacity, logo, "move it back to the start"; what tap, double tap and long press do; show on the lock screen or not; what the accessibility button, holding volume down and pressing it twice do. |
 | AI revision | Provider, key, model, thinking, server address (local), how much to change, presets, your own rules, time limit, "try it". |
 | Voice tasks | Google account (sign in or out), lists and their other names, the list for tasks that fit none, the AI that reads tasks (the revision one by default) and its time limit, event length and due date for timed tasks, how many tasks may wait on the lock screen, the tasks said there, waiting and saved lately (Edit, Undo), and "try it". |
 | Listening | Stop after seconds of silence, time limit. |
@@ -98,10 +99,31 @@ With no text field in front (home screen, a list), a tap opens the small task pa
 since there is nowhere to type: it shows what you say and the task it becomes. On the lock screen
 every gesture that records makes a task for the queue.
 
-Later in step 5: the accessibility shortcut button (`FLAG_REQUEST_ACCESSIBILITY_BUTTON`), and a
-long press or double press on volume down through the accessibility service's key events (screen
-on only, normal volume keeps working). No Quick Settings tile. Making Mirza the default digital
-assistant (long press on power) is left out.
+Other ways to start (PR 4), set on the same screen:
+
+- **Volume down**, held or pressed twice, each off by default. The typing service asks Android for
+  key events (`canRequestFilterKeyEvents`, `FLAG_REQUEST_FILTER_KEY_EVENTS`) only while one of the
+  two is set, and takes only volume down, only with the screen on and outside calls. A press is
+  held back to see what it becomes: a plain press still turns the volume down (with "twice" set,
+  a moment later, once no second press came), and holding it with nothing set for "held" turns it
+  down step by step, both with Android's volume panel. While Mirza listens, one press stops it.
+  The screenshot chord (power and volume down) is Android's and comes first: Android holds every
+  volume-down press back 150 ms for it before Mirza sees the press (not the release), so the
+  second press may come up to the double-tap time plus those 150 ms after the first release.
+  Mirza turns the volume down with `adjustSuggestedStreamVolume`, the closest public call to what
+  the key does; with a Cast session the key would change the remote volume, Mirza's press the
+  phone's.
+- **The accessibility button**, the floating one or the one in the navigation bar, dictating by
+  default. Since Android 12 a service asks for it in its XML only, and Android then turns the
+  button and the service on and off together (the service's page shows only a shortcut switch).
+  Asking at runtime is ignored, and asking in the typing service's XML would put the button on
+  everyone's screen and tie typing to it, both seen on the emulator. So the button lives in a
+  second accessibility service, "Mirza button" (`ButtonService`), that reads nothing and gets no
+  events: turn its shortcut on in Android's accessibility settings to get the button, off to
+  lose it. It works only while Mirza's typing is on too.
+
+No Quick Settings tile. Making Mirza the default digital assistant (long press on power) is left
+out.
 
 ## Voice tasks on Android
 
@@ -170,8 +192,10 @@ showing them and the buttons is Kotlin's job. Android adds:
    square with the white microphone).
 3. **Voice tasks.** Sign-in, the task panel and the Voice tasks screen, the capture flow, Undo and
    Edit, the lock-screen queue and the retry job.
-4. **Triggers and polish:** accessibility button, volume key, animations, and a battery check over
-   a day of use on the phone.
+4. **Triggers and polish:** accessibility button (its own small service, see "Gestures and
+   triggers"), volume key, animations (bubble colors, listening pulse, press and appear, screens
+   that slide, the task panel sliding up and fading between its views), and a battery check over a
+   day of use on the phone.
 5. **Release:** the Release workflow builds and signs the APK and attaches it to the GitHub
    release next to the desktop installers (only the real app, not the trial), and an install
    guide (Play Protect, restricted settings, Xiaomi).
@@ -203,7 +227,11 @@ the same way (`exec-in` ends the shell when the input ends, so nothing after `ca
 Remove the key after the test.
 
 `uiautomator dump` pauses the typing service while it runs, so screen tests tap by coordinates
-from screenshots instead. If the emulator's microphone gives only silence ("microphone silent
+from screenshots instead. `adb shell input keyevent` never reaches an accessibility key filter
+(injected keys skip it), so volume-down tests need a real key: `adb root`, then
+`adb shell "sendevent /dev/input/event1 1 114 1; sendevent /dev/input/event1 0 0 0"` for down and
+the same with `1 114 0` for up (event1 is the emulator's keyboard; `getevent -pl` lists them).
+`adb unroot` afterwards. If the emulator's microphone gives only silence ("microphone silent
 after 3 s") even after `emulator.sh mic`, restarting the emulator fixes it.
 
 ## Phone checklist
@@ -262,6 +290,24 @@ From PR 3 (voice tasks):
       the other. A task with "tomorrow" said before midnight and confirmed after keeps its day.
 - [ ] Sign out and say a task: it is kept ("Task kept, not saved yet") and listed as waiting.
       Sign in again: it is saved by itself.
+
+From PR 4 (triggers and polish):
+
+- [ ] Bubble and gestures: set "Hold volume down" to a voice task and "Press volume down twice" to
+      dictate. In a text field, press twice: dictation starts; one press stops it. Hold: the task
+      panel opens. A single press still lowers the volume, a moment later; holding with "held" set
+      to Nothing lowers it step by step.
+- [ ] Power and volume down together still take a screenshot. During a call, and while the phone
+      rings, volume down does what it always does. With the screen off it does nothing for Mirza.
+- [ ] "Accessibility settings" on that screen, turn on the "Mirza button" shortcut: the
+      accessibility button shows (floating, or in the navigation bar with three-button
+      navigation) and starts dictation. Turn the shortcut off: the button goes, typing stays on.
+      On Xiaomi, check the button works and that Mirza button stays on after a restart.
+- [ ] The animations feel right on the phone: screens slide, the task panel slides up and fades
+      between its views, the bubble pulses while listening and shrinks a little under the finger.
+      With animations off in Developer options, nothing pulses.
+- [ ] Battery: a day of normal use with the bubble on and a volume gesture set. Settings, Battery,
+      Mirza should be about as low as before PR 4 (note the number).
 
 ## Signing key
 

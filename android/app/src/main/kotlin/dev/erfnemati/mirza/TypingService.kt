@@ -1,6 +1,7 @@
 package dev.erfnemati.mirza
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.KeyguardManager
 import android.content.ClipData
 import android.content.ClipDescription
@@ -19,6 +20,7 @@ import android.provider.Settings as AndroidSettings
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import kotlin.math.max
@@ -54,7 +56,11 @@ class TypingService : AccessibilityService() {
     /** The lock screen (or a dark screen) is in front, as the screen broadcasts tell it. */
     private var lockedNow = false
     private val main = Handler(Looper.getMainLooper())
-    private val onSettings: (Settings) -> Unit = { updateBubble(it) }
+    private val onSettings: (Settings) -> Unit = {
+        updateBubble(it)
+        updateTriggers(it.gestures)
+    }
+    private val volume by lazy { VolumeKey(this) }
 
     /**
      * Hides the bubble on the lock screen when the setting says so. "User present" comes while the
@@ -90,7 +96,22 @@ class TypingService : AccessibilityService() {
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(screen, filter, RECEIVER_EXPORTED) else registerReceiver(screen, filter)
         lockedNow = locked()
         updateBubble(Core.settings)
+        updateTriggers(Core.settings.gestures)
     }
+
+    /** Asks Android for the keys only while a volume gesture is set: the key filter sees every key. */
+    private fun updateTriggers(g: Gestures) {
+        val info = serviceInfo ?: return
+        val on = volume.wanted(g)
+        val flag = AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
+        if (on == (info.flags and flag != 0)) return
+        if (!on) volume.reset()
+        info.flags = if (on) info.flags or flag else info.flags and flag.inv()
+        serviceInfo = info
+        AppLog.add("volume down: held ${g.volumeLongPress.id}, twice ${g.volumeDoublePress.id}")
+    }
+
+    override fun onKeyEvent(e: KeyEvent): Boolean = volume.onKey(e)
 
     override fun onAccessibilityEvent(e: AccessibilityEvent) {
         if (e.packageName?.toString() == packageName) return
@@ -107,6 +128,7 @@ class TypingService : AccessibilityService() {
     override fun onUnbind(intent: Intent?): Boolean {
         Core.listeners.remove(onSettings)
         runCatching { unregisterReceiver(screen) }
+        volume.reset()
         bubble?.hide()
         bubble = null
         instance = null

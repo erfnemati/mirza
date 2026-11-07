@@ -300,6 +300,39 @@ fun BubbleScreen() {
             }
         }
     }
+    Section("Other ways to start") {
+        val all = Gesture.entries.map { it to it.label }
+        ChoiceRow(
+            "Accessibility button",
+            "Android's own button, in the navigation bar or floating at the edge of the screen.",
+            g.button,
+            all,
+        ) { Core.set("gestures.button", it.id) }
+        if (!ButtonService.running) {
+            SmallNote("To get the button, turn on “Mirza button” in Android's accessibility settings.")
+            ButtonRow {
+                OutlinedButton(onClick = { ctx.startActivity(Setup.accessibilityIntent(ctx, ButtonService::class.java)) }) {
+                    Text("Accessibility settings")
+                }
+            }
+        }
+        ChoiceRow("Hold volume down", null, g.volumeLongPress, all) { Core.set("gestures.volume_long_press", it.id) }
+        ChoiceRow("Press volume down twice", null, g.volumeDoublePress, all) { Core.set("gestures.volume_double_press", it.id) }
+        SmallNote(
+            "Volume down works only while the screen is on, and never during a call. While Mirza listens, one press " +
+                "stops it. Otherwise a short press still turns the volume down; with “twice” set, a moment later.",
+        )
+    }
+}
+
+@Composable
+private fun SmallNote(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+    )
 }
 
 @Composable

@@ -168,11 +168,26 @@ pub struct Gestures {
     pub tap: Gesture,
     pub double_tap: Gesture,
     pub long_press: Gesture,
+    /// Android's accessibility button (in the navigation bar, or floating). It shows up only when
+    /// the user turns on the "Mirza button" service, so it dictates by default.
+    pub button: Gesture,
+    /// Holding volume down while the screen is on. Off by default, like the next one.
+    pub volume_long_press: Gesture,
+    /// Pressing volume down twice quickly while the screen is on. A single press then changes the
+    /// volume a moment later, once it is clear no second press follows.
+    pub volume_double_press: Gesture,
 }
 
 impl Default for Gestures {
     fn default() -> Self {
-        Self { tap: Gesture::Dictate, double_tap: Gesture::Revise, long_press: Gesture::Task }
+        Self {
+            tap: Gesture::Dictate,
+            double_tap: Gesture::Revise,
+            long_press: Gesture::Task,
+            button: Gesture::Dictate,
+            volume_long_press: Gesture::None,
+            volume_double_press: Gesture::None,
+        }
     }
 }
 
@@ -381,6 +396,11 @@ mod tests {
         assert_eq!(MobileConfig::default().gestures.long_press, Gesture::Task);
         let cfg = store.set("gestures.long_press", &json!("revise")).unwrap();
         assert_eq!(cfg.gestures.long_press, Gesture::Revise);
+        let g = MobileConfig::default().gestures;
+        assert_eq!([g.volume_long_press, g.volume_double_press], [Gesture::None; 2], "off until chosen");
+        assert_eq!(g.button, Gesture::Dictate, "the button exists only once turned on in Android");
+        let cfg = store.set("gestures.volume_double_press", &json!("task")).unwrap();
+        assert_eq!(cfg.gestures.volume_double_press, Gesture::Task);
         assert!(store.set("tasks.held_limit", &json!(11)).is_err());
         assert!(store.set("tasks.held_limit", &json!(0)).is_err());
         assert!(store.set("tasks.provider", &json!("bard")).is_err());
