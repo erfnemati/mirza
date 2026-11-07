@@ -10,5 +10,6 @@ pub mod net;
 pub mod normalize;
 pub mod providers;
 pub mod secrets;
+pub mod tasks;
 pub mod update;
 pub mod usage;

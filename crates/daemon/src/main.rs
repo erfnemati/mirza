@@ -9,6 +9,7 @@ mod autostart;
 mod daemon;
 mod desktop;
 mod ipc;
+mod tasks;
 
 use std::io::{BufRead, IsTerminal, Write};
 use std::process::ExitCode;
@@ -24,6 +25,8 @@ Without a command, starts Mirza in the tray.
 Commands for the running app:
   toggle             start dictating, or stop if already dictating
   toggle-revise      the same, with the text revised by AI before it's typed
+  toggle-task        start or stop saying a task for Google Tasks
+  add-task <text>    save a task from text, as if it was said
   start | stop       start or stop dictating
   cancel             stop now, without waiting for the rest of the text
   status             show what Mirza is doing
@@ -37,6 +40,10 @@ Commands for the running app:
 Other commands:
   set-key <service>  save an API key (read from standard input): soniox,
                      elevenlabs, openai, gemini, claude, openrouter or local
+  google-login [--client <file>]
+                     sign in to Google for voice tasks; --client saves the
+                     client file downloaded from Google Cloud first
+  google-logout      sign out of Google; waiting tasks stay
   config-path        print where the settings file is
 ";
 
@@ -64,8 +71,12 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         ("set-key", Some(p)) => return set_key(&p),
+        ("google-login", _) => return google_login(&args[1..]),
+        ("google-logout", _) => return google_logout(),
         ("toggle", _) => Request::Toggle,
         ("toggle-revise", _) => Request::ToggleRevise,
+        ("toggle-task", _) => Request::ToggleTask,
+        ("add-task", Some(_)) => Request::AddTask { text: args[1..].join(" ") },
         ("start", _) => Request::Start,
         ("stop", _) => Request::Stop,
         ("cancel", _) => Request::Cancel,
@@ -92,6 +103,11 @@ fn main() -> ExitCode {
                 if !s.last_error.is_empty() {
                     println!("last error: {}", s.last_error);
                 }
+            }
+            if let Some(d) = &reply.data
+                && let Some(title) = d["title"].as_str()
+            {
+                println!("{title}\n{}", d["body"].as_str().unwrap_or_default());
             }
             if reply.ok {
                 ExitCode::SUCCESS
@@ -125,6 +141,86 @@ fn set_key(provider: &str) -> ExitCode {
     match secrets::set(provider, key.trim()) {
         Ok(()) => {
             println!("Saved to {}", secrets::keys_path().display());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("mirza: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Signs in to Google for voice tasks, in this process; the running app
+/// picks the sign-in up afterwards.
+fn google_login(args: &[String]) -> ExitCode {
+    let path = config::config_path();
+    if let [flag, file, ..] = args
+        && flag == "--client"
+    {
+        let saved = std::fs::read_to_string(file)
+            .map_err(|e| format!("{file}: {e}"))
+            .and_then(|text| mirza_core::tasks::settings::read_client(&text))
+            .and_then(|(id, secret)| {
+                mirza_core::tasks::settings::save_client(&path, &id, secret.as_deref()).map_err(|e| e.to_string())
+            });
+        if let Err(e) = saved {
+            eprintln!("mirza: {e}");
+            return ExitCode::FAILURE;
+        }
+        println!("Saved the Google client.");
+    }
+    let cfg = match config::Config::load(&path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("mirza: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let rt = runtime();
+    let result = rt.block_on(async {
+        // An address pasted here stands in for the browser coming back.
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        std::thread::spawn(move || {
+            for line in std::io::stdin().lock().lines().map_while(Result::ok) {
+                if tx.blocking_send(line).is_err() {
+                    return;
+                }
+            }
+        });
+        let show = |url: &str| {
+            println!("Sign in to Google in your browser. If it doesn't open, open this address:\n\n{url}\n");
+            println!("On a computer without a browser, sign in on another device, then paste here the");
+            println!("address the browser ends up at (it starts with http://127.0.0.1) and press Enter.");
+            desktop::open_path(url);
+        };
+        let granted = mirza_core::tasks::sign_in(&cfg, show, rx).await?;
+        let _ = ipc::request(&Request::RetryTasks).await;
+        Ok::<_, String>(granted)
+    });
+    match result {
+        Ok(g) if g.calendar() => {
+            println!("Signed in. Tasks with a time also go to Google Calendar.");
+            ExitCode::SUCCESS
+        }
+        Ok(_) => {
+            println!("Signed in, without Calendar: tasks with a time are saved as tasks only.");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("mirza: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn google_logout() -> ExitCode {
+    let cfg = config::Config::load(&config::config_path()).unwrap_or_default();
+    let store = mirza_core::tasks::Store::new(mirza_core::tasks::Store::default_dir());
+    let rt = runtime();
+    match rt.block_on(mirza_core::tasks::sign_out(&cfg, &store)) {
+        Ok(()) => {
+            let _ = rt.block_on(ipc::request(&Request::RetryTasks));
+            println!("Signed out of Google. Tasks said from now on wait until you sign in again.");
             ExitCode::SUCCESS
         }
         Err(e) => {

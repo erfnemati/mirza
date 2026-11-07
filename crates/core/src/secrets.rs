@@ -11,7 +11,16 @@ pub fn keys_path() -> PathBuf {
     config_dir().join("keys.toml")
 }
 
+/// The Google sign-in for voice tasks, kept like a key. Not "google": that
+/// name would also read GOOGLE_API_KEY, which is a Gemini key.
+pub const GOOGLE_REFRESH_TOKEN: &str = "google_refresh_token";
+/// The secret of your own Google OAuth client.
+pub const GOOGLE_CLIENT_SECRET: &str = "google_client_secret";
+
 fn env_names(provider: &str) -> Vec<String> {
+    if provider.starts_with("google_") {
+        return vec![format!("MIRZA_{}", provider.to_uppercase())];
+    }
     let up = provider.to_uppercase();
     let mut names = vec![format!("MIRZA_{up}_API_KEY")];
     match provider {
@@ -80,6 +89,7 @@ mod tests {
         assert_eq!(env_names("claude"), ["MIRZA_CLAUDE_API_KEY", "ANTHROPIC_API_KEY"]);
         assert_eq!(env_names("gemini"), ["MIRZA_GEMINI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"]);
         assert_eq!(env_names("local"), ["MIRZA_LOCAL_API_KEY"]);
+        assert_eq!(env_names(GOOGLE_REFRESH_TOKEN), ["MIRZA_GOOGLE_REFRESH_TOKEN"]);
         assert_eq!(services(), ["soniox", "elevenlabs", "openai", "gemini", "claude", "openrouter", "local"]);
     }
 }

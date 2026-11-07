@@ -21,6 +21,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::desktop::{self, Action as TrayAction, Desktop, TrayView};
+use crate::tasks::{self, Tasks};
 
 /// The app's ID: on Linux its .desktop file name, and how the shortcuts portal
 /// knows it; on Windows what its notifications are filed under.
@@ -59,6 +60,14 @@ pub enum Msg {
     Update(Result<Release, String>),
     /// Microphone loudness, 0 to 1, about 20 times a second while recording.
     Level(f32),
+    /// Voice tasks: saving, undoing or changing one finished.
+    Tasks(tasks::Done),
+    /// A button on a notification was clicked: (notification id, action).
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    NoteAction(u32, String),
+    /// A button on a task's notification was clicked: (task id, action).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    TaskAction(String, String),
 }
 
 pub struct Done {
@@ -72,6 +81,18 @@ pub struct Done {
     raw: Option<String>,
     /// Why the text was typed without AI revision.
     unrevised: Option<String>,
+    /// A task session: what was said.
+    task: Option<String>,
+}
+
+/// What a session is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Dictate,
+    /// Dictate, revised with AI before typing.
+    Revise,
+    /// Say a task for Google Tasks; nothing is typed.
+    Task,
 }
 
 /// The AI part of a "dictate and revise" session.
@@ -119,6 +140,8 @@ struct Session {
     /// The provider sent its last words; later events are ignored.
     finished: bool,
     revision: Option<Revision>,
+    /// A task session: the transcript so far.
+    task: Option<String>,
 }
 
 /// One entry of Recent text.
@@ -157,12 +180,14 @@ pub struct Daemon {
     update: Option<Release>,
     /// When to check for updates next; None while a check is running.
     update_due: Option<Instant>,
+    tasks: Tasks,
 }
 
 impl Daemon {
     pub async fn new(tx: mpsc::UnboundedSender<Msg>, cfg_path: PathBuf, desktop: Desktop) -> Result<Self, String> {
         let cfg = Config::load(&cfg_path).map_err(|e| e.to_string())?;
         let status = Status { provider: cfg.active_provider.clone(), ..Default::default() };
+        let tasks = Tasks::new(&cfg);
         Ok(Self {
             tx,
             cfg_mtime: mtime(&cfg_path),
@@ -185,6 +210,7 @@ impl Daemon {
             started_anim: Instant::now(),
             update: None,
             update_due: Some(Instant::now() + UPDATE_FIRST),
+            tasks,
         })
     }
 
@@ -221,6 +247,9 @@ impl Daemon {
     /// Handles one message; returns false to quit.
     async fn handle(&mut self, msg: Msg) -> bool {
         match msg {
+            Msg::Ipc(req, reply) if tasks::is_task_request(&req) => {
+                self.tasks.request(req, reply, &self.cfg, &self.tx);
+            }
             Msg::Ipc(req, reply) => {
                 let quit = req == Request::Quit;
                 let r = self.request(req).await;
@@ -281,6 +310,13 @@ impl Daemon {
                 }
             }
             Msg::Update(result) => self.got_update(result).await,
+            Msg::Tasks(done) => self.tasks_done(done).await,
+            Msg::NoteAction(note, action) => {
+                if let Some(id) = self.tasks.task_of(note) {
+                    self.task_action(id, &action).await;
+                }
+            }
+            Msg::TaskAction(id, action) => self.task_action(id, &action).await,
         }
         true
     }
@@ -288,10 +324,11 @@ impl Daemon {
     async fn request(&mut self, req: Request) -> Reply {
         let result = match req {
             Request::Toggle => self.toggle().await,
-            Request::ToggleRevise => self.toggle_kind(true).await,
+            Request::ToggleRevise => self.toggle_kind(Kind::Revise).await,
+            Request::ToggleTask => self.toggle_kind(Kind::Task).await,
             Request::Start => {
                 if self.session.is_none() {
-                    self.start(None, false).await
+                    self.start(None, Kind::Dictate).await
                 } else {
                     Ok(())
                 }
@@ -334,6 +371,13 @@ impl Daemon {
                 sound::play(Sound::Start, self.cfg.sound_volume);
                 Ok(())
             }
+            // Answered in `handle`, by `Tasks::request`.
+            Request::Tasks
+            | Request::TaskLists { .. }
+            | Request::AddTask { .. }
+            | Request::UndoTask { .. }
+            | Request::EditTask { .. }
+            | Request::RetryTasks => Ok(()),
         };
         match result {
             Ok(()) => Reply { status: Some(self.status.clone()), ..Reply::ok() },
@@ -342,17 +386,16 @@ impl Daemon {
     }
 
     async fn toggle(&mut self) -> Result<(), String> {
-        self.toggle_kind(false).await
+        self.toggle_kind(Kind::Dictate).await
     }
 
-    /// Starts a session, revised with AI if `revise`, or acts on the one
-    /// running.
-    async fn toggle_kind(&mut self, revise: bool) -> Result<(), String> {
+    /// Starts a session of this kind, or acts on the one running.
+    async fn toggle_kind(&mut self, kind: Kind) -> Result<(), String> {
         if self.session.is_some() {
             self.press_during_session().await;
             Ok(())
         } else {
-            self.start(None, revise).await
+            self.start(None, kind).await
         }
     }
 
@@ -370,18 +413,19 @@ impl Daemon {
 
     /// Starts a session. For hold-to-talk, the connection waits until the key
     /// has been held for the minimum time, so a tap costs nothing.
-    async fn start(&mut self, hold: Option<String>, revise: bool) -> Result<(), String> {
-        let result = self.try_start(hold, revise).await;
+    async fn start(&mut self, hold: Option<String>, kind: Kind) -> Result<(), String> {
+        let result = self.try_start(hold, kind).await;
         if let Err(e) = &result {
             self.play(Sound::Error);
             self.status.last_error = e.clone();
-            self.desktop.notify("Dictation failed", e, true, 0).await;
+            let title = if kind == Kind::Task { "Can't take a task" } else { "Dictation failed" };
+            self.desktop.notify(title, e, true, 0).await;
             self.update_tray().await;
         }
         result
     }
 
-    async fn try_start(&mut self, hold: Option<String>, revise: bool) -> Result<(), String> {
+    async fn try_start(&mut self, hold: Option<String>, kind: Kind) -> Result<(), String> {
         if self.session.is_some() {
             return Err("already dictating".into());
         }
@@ -392,7 +436,7 @@ impl Daemon {
         let (api_key, _) = secrets::get(&provider)
             .ok_or_else(|| format!("No API key for {name}. Run `mirza set-key {provider}` or add it in Settings."))?;
         let proxy = net::resolve_proxy(&cfg.proxy).map_err(|e| e.to_string())?;
-        let revision = if revise {
+        let revision = if kind == Kind::Revise {
             // Checked now, so a missing key doesn't cost a whole dictation.
             let kind = match cfg.revision.provider.trim() {
                 "" => return Err("AI revision is off. Choose an AI provider in Settings > AI revision.".into()),
@@ -417,7 +461,8 @@ impl Daemon {
         } else {
             None
         };
-        let injector = self.desktop.injector()?;
+        // A task is saved, not typed: it works without typing.
+        let injector = if kind == Kind::Task { None } else { Some(self.desktop.injector()?) };
 
         let rate = providers::sample_rate(&provider);
         let (atx, arx) = mpsc::channel(1200); // a minute of 50 ms chunks while connecting
@@ -437,12 +482,15 @@ impl Daemon {
             paste_over_chars: cfg.typing.paste_over_chars,
             keep_on_clipboard: cfg.typing.keep_on_clipboard,
         };
-        let typing = injector.begin(opts, focus, move |e| {
-            let _ = tx.send(Msg::Typing(id, e));
+        let typing = injector.map(|injector| {
+            let typing = injector.begin(opts, focus, move |e| {
+                let _ = tx.send(Msg::Typing(id, e));
+            });
+            if !self.held.is_empty() {
+                typing.hold(true); // the shortcut that started this is still down
+            }
+            typing
         });
-        if !self.held.is_empty() {
-            typing.hold(true); // the shortcut that started this is still down
-        }
         let now = Instant::now();
         let is_hold = hold.is_some();
         self.session = Some(Session {
@@ -451,7 +499,7 @@ impl Daemon {
             audio_rx: Some(arx),
             request: Some(StreamRequest { provider, api_key, settings, proxy }),
             stream: None,
-            typing: Some(typing),
+            typing,
             started: now,
             last_heard: now,
             stopping: None,
@@ -463,6 +511,7 @@ impl Daemon {
             stopped_sound: false,
             finished: false,
             revision,
+            task: (kind == Kind::Task).then(String::new),
         });
         if is_hold {
             let tx = self.tx.clone();
@@ -479,11 +528,12 @@ impl Daemon {
         self.status.last_error.clear();
         if self.cfg.notifications {
             let ai = self.session.as_ref().and_then(|s| s.revision.as_ref()).map(|r| r.client.kind().name());
-            let body = match ai {
-                Some(ai) => format!("{name}, then revised by {ai}"),
-                None => name,
+            let (title, body) = match (kind, ai) {
+                (Kind::Task, _) => ("Say a task…", format!("{name}, then saved to Google Tasks")),
+                (_, Some(ai)) => ("Listening…", format!("{name}, then revised by {ai}")),
+                _ => ("Listening…", name),
             };
-            let note = self.desktop.notify("Listening…", &body, false, 0).await;
+            let note = self.desktop.notify(title, &body, false, 0).await;
             if let Some(s) = self.session.as_mut() {
                 s.note = note;
             }
@@ -567,12 +617,13 @@ impl Daemon {
         let (id, note) = (s.id, s.note);
         let raw = s.revision.as_ref().map(|r| r.transcript.trim().to_owned());
         let unrevised = s.revision.as_mut().and_then(|r| r.unrevised.take());
+        let task = s.task.take();
         let typing = s.typing.take();
         let tx = self.tx.clone();
         self.status.state = State::Finishing;
         tokio::task::spawn_blocking(move || {
             let outcome = typing.map(TypingSession::finish).unwrap_or_default();
-            let _ = tx.send(Msg::Done(Done { id, outcome, error, reason, note, raw, unrevised }));
+            let _ = tx.send(Msg::Done(Done { id, outcome, error, reason, note, raw, unrevised, task }));
         });
         self.update_tray().await;
     }
@@ -586,6 +637,10 @@ impl Daemon {
             d.error
         );
         self.status.state = if self.session.is_some() { State::Listening } else { State::Idle };
+        if let Some(said) = d.task.clone() {
+            self.task_session_done(d, said).await;
+            return;
+        }
         let text = d.outcome.text.trim().to_owned();
         let raw = d.raw.clone().unwrap_or_default();
         // A cancelled revise session typed nothing, but what was said is kept.
@@ -656,7 +711,9 @@ impl Daemon {
             SttEvent::Final(text) => {
                 let text = if persian { normalize::persian_letters(&text) } else { text };
                 tracing::debug!("final: {text:?}");
-                if let Some(r) = s.revision.as_mut() {
+                if let Some(t) = s.task.as_mut() {
+                    t.push_str(&text);
+                } else if let Some(r) = s.revision.as_mut() {
                     r.transcript.push_str(&text);
                 } else if let Some(t) = &s.typing {
                     t.push(text);
@@ -760,6 +817,7 @@ impl Daemon {
         if self.cfg.check_updates && self.update_due.is_some_and(|t| Instant::now() >= t) {
             self.check_update();
         }
+        self.tasks.tick(&self.tx);
         let Some(s) = self.session.as_ref() else { return };
         match s.stopping {
             // Once the transcript is complete, a revise session waits for the
@@ -793,12 +851,18 @@ impl Daemon {
                     t.hold(true);
                 }
                 let Some(sc) = self.cfg.shortcuts.iter().find(|s| s.id() == id).cloned() else { return };
-                let revise = sc.action == ShortcutAction::Revise;
+                let kind = match sc.action {
+                    ShortcutAction::Revise => Kind::Revise,
+                    ShortcutAction::Task => Kind::Task,
+                    _ => Kind::Dictate,
+                };
                 let _ = match (sc.action, sc.mode) {
-                    (ShortcutAction::Dictate | ShortcutAction::Revise, Mode::Toggle) => self.toggle_kind(revise).await,
-                    (ShortcutAction::Dictate | ShortcutAction::Revise, Mode::Hold) => {
+                    (ShortcutAction::Dictate | ShortcutAction::Revise | ShortcutAction::Task, Mode::Toggle) => {
+                        self.toggle_kind(kind).await
+                    }
+                    (ShortcutAction::Dictate | ShortcutAction::Revise | ShortcutAction::Task, Mode::Hold) => {
                         if self.session.is_none() {
-                            self.start(Some(id), revise).await
+                            self.start(Some(id), kind).await
                         } else {
                             self.press_during_session().await;
                             Ok(())
@@ -879,6 +943,20 @@ impl Daemon {
                 _ => Ok(()),
             },
             TrayAction::OpenSettings => self.open_settings(),
+            TrayAction::UndoTask => match self.tasks.last.clone() {
+                Some((id, _)) => {
+                    self.task_action(id, "undo").await;
+                    Ok(())
+                }
+                None => Ok(()),
+            },
+            TrayAction::EditTask => match self.tasks.last.clone() {
+                Some((id, _)) => {
+                    self.task_action(id, "edit").await;
+                    Ok(())
+                }
+                None => Ok(()),
+            },
             TrayAction::OpenConfigFile => {
                 desktop::open_path(&self.cfg_path);
                 Ok(())
@@ -898,11 +976,16 @@ impl Daemon {
     }
 
     fn open_settings(&mut self) -> Result<(), String> {
+        self.open_panel(&[])
+    }
+
+    /// Opens the settings window with these arguments (e.g. a task to edit).
+    fn open_panel(&mut self, args: &[&str]) -> Result<(), String> {
         let name = if cfg!(windows) { "mirza-panel.exe" } else { "mirza-panel" };
         let panel = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join(name)));
         match panel.filter(|p| p.is_file()) {
             Some(p) => {
-                let mut child = std::process::Command::new(p).spawn().map_err(|e| e.to_string())?;
+                let mut child = std::process::Command::new(p).args(args).spawn().map_err(|e| e.to_string())?;
                 // Collect its exit status when the window closes, so it doesn't linger.
                 std::thread::spawn(move || child.wait());
                 Ok(())
@@ -950,6 +1033,7 @@ impl Daemon {
                     self.update_due = Some(Instant::now()); // just turned on
                 }
                 self.cfg = cfg;
+                self.tasks.reload(&self.cfg);
                 self.status.provider = self.cfg.active_provider.clone();
                 if rebind {
                     self.bind_shortcuts().await;
@@ -1086,6 +1170,7 @@ impl Daemon {
             has_last: !self.history.is_empty(),
             spend: self.spend_line(),
             update: self.update.as_ref().map(|r| r.version.clone()).unwrap_or_default(),
+            last_task: self.tasks.last.as_ref().map(|(_, t)| t.clone()).unwrap_or_default(),
         }
     }
 
@@ -1154,6 +1239,125 @@ impl Daemon {
         }
         self.update = release;
         self.update_tray().await;
+    }
+}
+
+impl Daemon {
+    /// A task session ended: keep what was said and start saving it.
+    async fn task_session_done(&mut self, d: Done, said: String) {
+        let said = said.trim().to_owned();
+        let keep = |me: &mut Self, text: &str| {
+            if !text.is_empty() && me.cfg.history_size > 0 {
+                me.status.last_text = text.to_owned();
+                me.history.push_back(HistoryItem { text: text.to_owned(), raw: String::new() });
+                while me.history.len() > me.cfg.history_size {
+                    me.history.pop_front();
+                }
+            }
+        };
+        if let Some(e) = d.error {
+            keep(self, &said);
+            self.status.last_error = e.clone();
+            let body = if said.is_empty() { e } else { format!("{e}\nWhat you said is in Recent text in Settings.") };
+            self.desktop.notify("Task not saved", &body, true, d.note).await;
+        } else if d.reason == Reason::TooShort {
+            self.desktop.close_notification(d.note).await;
+        } else if d.reason == Reason::Cancelled {
+            if self.cfg.notifications {
+                self.desktop.notify("Cancelled", "No task was saved.", false, d.note).await;
+            }
+        } else if said.is_empty() {
+            self.desktop.notify("No task heard", "Nothing was saved.", false, d.note).await;
+        } else {
+            match self.tasks.capture(&said, d.note, &self.tx) {
+                Ok(_) => {
+                    if self.cfg.notifications {
+                        self.desktop.notify("Saving the task…", &said, false, d.note).await;
+                    }
+                }
+                Err(e) => {
+                    keep(self, &said);
+                    let body = format!("{e} What you said is in Recent text in Settings.");
+                    self.desktop.notify("Task not saved", &body, true, d.note).await;
+                }
+            }
+        }
+        self.update_tray().await;
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(20)).await;
+            let _ = tx.send(Msg::RefreshUsage);
+        });
+        self.usage_at = None;
+    }
+
+    async fn tasks_done(&mut self, done: tasks::Done) {
+        match done {
+            tasks::Done::Processed { outcomes, note, due_pass } => {
+                if due_pass {
+                    self.tasks.pass_done();
+                }
+                let lists = self.tasks.book.store().lists().map(|(_, l)| l).unwrap_or_default();
+                let today = mirza_core::tasks::Said::now().zoned().date();
+                for o in &outcomes {
+                    // A pass over the queue only reports what got saved; the
+                    // tasks still waiting were reported when they were said.
+                    if due_pass && !matches!(o, mirza_core::tasks::Outcome::Saved(_)) {
+                        continue;
+                    }
+                    let Some((title, body)) = mirza_core::tasks::notification(o, &lists, today) else { continue };
+                    let id = match o {
+                        mirza_core::tasks::Outcome::Saved(s) => s.id.clone(),
+                        mirza_core::tasks::Outcome::Waiting { entry, .. }
+                        | mirza_core::tasks::Outcome::Stuck { entry, .. } => entry.id.clone(),
+                        mirza_core::tasks::Outcome::Gone(_) => continue,
+                    };
+                    let short = match o {
+                        mirza_core::tasks::Outcome::Saved(s) => s.draft.title.clone(),
+                        _ => self.tasks.title_of(&id),
+                    };
+                    let shown = self.desktop.notify_task(&title, &body, &id, note).await;
+                    self.tasks.noted(shown, &id);
+                    self.tasks.last = Some((id, short));
+                }
+            }
+            tasks::Done::Undone { id, title, result, quiet } => match result {
+                Ok(()) => {
+                    if self.tasks.last.as_ref().is_some_and(|(l, _)| *l == id) {
+                        self.tasks.last = None;
+                    }
+                    if !quiet {
+                        self.desktop.notify("Task undone", &title, false, 0).await;
+                    }
+                }
+                Err(e) if !quiet => {
+                    self.desktop.notify("Task not undone", &e, true, 0).await;
+                }
+                Err(_) => {}
+            },
+            tasks::Done::Edited(o) => {
+                if let mirza_core::tasks::Outcome::Saved(s) = &*o
+                    && self.tasks.last.as_ref().is_some_and(|(l, _)| *l == s.id)
+                {
+                    self.tasks.last = Some((s.id.clone(), s.draft.title.clone()));
+                }
+            }
+        }
+        self.update_tray().await;
+    }
+
+    /// Undo or Edit, from a notification or the tray.
+    async fn task_action(&mut self, id: String, action: &str) {
+        tracing::debug!("task {id}: {action}");
+        match action {
+            "undo" => self.tasks.undo(id, false, &self.tx, None),
+            "edit" => {
+                if let Err(e) = self.open_panel(&["--edit-task", &id]) {
+                    self.desktop.notify("Mirza", &e, true, 0).await;
+                }
+            }
+            _ => {}
+        }
     }
 }
 

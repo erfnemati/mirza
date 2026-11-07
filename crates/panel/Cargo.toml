@@ -20,4 +20,4 @@ serde_json = "1.0.151"
 # waits for a development server.
 tauri = { version = "2.12.0", features = ["custom-protocol"] }
 tauri-plugin-single-instance = "2.5.1"
-tokio = { version = "1.53.1", features = ["process"] }
+tokio = { version = "1.53.1", features = ["macros", "process", "sync"] }
