@@ -77,17 +77,20 @@ Screens, from the desktop panel:
 |---|---|
 | Setup | A checklist that shows what is missing and opens the right Android screen: microphone, notifications, accessibility (with the restricted-settings and Play Protect steps), Xiaomi Autostart and Battery saver, turning the trial's service off. The screen stays out of recents (Xiaomi force-stops an app swiped away there). Shown on its own whenever typing is off. |
 | Speech | Service (Soniox first; OpenAI and ElevenLabs if the core's providers work on Android), key, model, languages, "only these languages", words to expect. |
-| Bubble and gestures | Size, opacity, logo, start position; what tap, double tap and long press do; show on the lock screen or not. |
+| Bubble and gestures | Size, opacity, logo, "move it back to the start"; what tap, double tap and long press do; show on the lock screen or not. |
 | AI revision | Provider, key, model, thinking, server address (local), how much to change, presets, your own rules, time limit, "try it". |
 | Tasks | Google account (sign in or out), lists and the project names that pick them, the calendar for timed tasks, lock-screen queue limit. |
 | Listening | Stop after seconds of silence, time limit. |
 | Typing | Persian letters, keep a copy in the clipboard. |
-| History and usage | Recent texts (on the phone only), Soniox balance. |
-| General | Proxy, sounds, notifications, check for updates, about. |
+| Recent text | The last texts dictated, with the text before AI revision; copy, clear, how many to keep (on the phone only). |
+| Usage | Soniox cost this month and today, minutes, dictations, and the balance left once it is entered; other services link to their own usage page. |
+| General | Proxy, sounds and their volume, notifications, check for updates. |
+| About | Version, check for updates by hand, copy the log, the project page. |
 
 ## Gestures and triggers
 
-Defaults, all changeable: tap = dictate, double tap = dictate and revise, long press = voice task.
+Defaults, all changeable: tap = dictate, double tap = dictate and revise, long press = voice task
+(until voice tasks arrive in PR 3, long press opens Mirza).
 The first tap starts recording at once; a second tap within the double-tap time only marks the
 dictation for revision (the two differ only after the audio), so a plain tap never waits. While
 listening, a tap stops.
@@ -176,6 +179,8 @@ with the release key when it is found, so they install over a release build and 
 around; they also carry `DebugReceiver`, adb hooks that only the shell can use:
 
     adb shell am broadcast -n dev.erfnemati.mirza/.DebugReceiver -a mirza.TAP      # tap the bubble
+    ... -a mirza.TAP --es mode revise                                               # the same, revised by AI
+    ... -a mirza.SWITCH --es mode revise                                            # a double tap while it records
     ... -a mirza.SET --es path proxy --es json '"http://10.0.2.2:10808"'           # change a setting
     ... -a mirza.UPDATE                                                             # check for updates
 
@@ -185,6 +190,10 @@ A key can go in without showing up in any command line, fed through stdin:
 then `adb shell "run-as dev.erfnemati.mirza chmod 700 files/mirza"` and `chmod 600` on the file
 the same way (`exec-in` ends the shell when the input ends, so nothing after `cat` runs there).
 Remove the key after the test.
+
+`uiautomator dump` pauses the typing service while it runs, so screen tests tap by coordinates
+from screenshots instead. If the emulator's microphone gives only silence ("microphone silent
+after 3 s") even after `emulator.sh mic`, restarting the emulator fixes it.
 
 ## Phone checklist
 
@@ -207,10 +216,24 @@ From PR 1 (skeleton and dictation):
       The text lands at the cursor, half-spaces are right, nothing is lost at the start.
 - [ ] While recording, "Mirza is listening" with a Stop button; Stop ends it and the
       notification goes away. No Mirza notification when idle.
-- [ ] Long press on the bubble opens Mirza; drag moves it and the place stays.
+- [ ] Long press on the bubble does what Bubble and gestures says; drag moves it and the place
+      stays.
 - [ ] Mirza leaves recent apps once you leave it, and typing stays on. Restart the phone: the
       bubble comes back by itself.
 - [ ] How it feels: start delay, sounds.
+
+From PR 2 (the other screens and AI revision):
+
+- [ ] The launcher icon is the desktop logo, also with the launcher's themed icons on; every
+      screen reads well in dark mode.
+- [ ] AI revision with a real key: double tap the bubble and say something with fillers and a
+      correction ("no wait, ..."). The bubble turns purple while revising and the revised text
+      lands; Recent text shows "Before AI revision". A tap while it is purple types the text
+      without revision.
+- [ ] "On the lock screen" off: the bubble is gone on the lock screen and back right after
+      unlocking with the PIN and with the fingerprint.
+- [ ] The volume slider plays a test sound at the chosen volume; start and stop sounds follow it.
+- [ ] Usage shows the Soniox numbers (through the proxy if one is set).
 
 ## Signing key
 
