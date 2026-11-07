@@ -2575,7 +2575,7 @@ dependencies = [
 
 [[package]]
 name = "mirza"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "futures-util",
  "ksni",
@@ -2597,7 +2597,7 @@ dependencies = [
 
 [[package]]
 name = "mirza-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64 0.23.1",
  "cpal",
@@ -2625,7 +2625,7 @@ dependencies = [
 
 [[package]]
 name = "mirza-hotkey"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ashpd",
  "core-foundation",
@@ -2640,7 +2640,7 @@ dependencies = [
 
 [[package]]
 name = "mirza-inject"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "arboard",
  "core-foundation",
@@ -2655,7 +2655,7 @@ dependencies = [
 
 [[package]]
 name = "mirza-mobile"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "jiff",
  "mirza-core",
@@ -2670,7 +2670,7 @@ dependencies = [
 
 [[package]]
 name = "mirza-panel"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "mirza-core",
  "serde",
