@@ -1,6 +1,6 @@
 # Spoken tasks for trying the task prompt, written the way a speech
 # recognizer returns them (no half-spaces, fillers left in). The lists for
-# these are Personal, Learning, Financial, Acme, Hamrah.
+# these are Personal, Learning, Financial, Acme, Nova.
 #   cargo run -p mirza-core --example task -- parse claude < crates/core/examples/task-cases.txt
 یادم بنداز فردا ساعت ۵ به علی زنگ بزنم
 خب اِ باید پس فردا قبض برق رو پرداخت کنم
@@ -11,10 +11,10 @@ call Sara about the contract tomorrow at 3
 کتاب Designing Data Intensive Applications رو تا آخر ماه تموم کنم
 remind me to renew my passport on March 3
 پنجشنبه ساعت هشت با رضا شام
-هر دوشنبه ساعت ۹ گزارش هفتگی رو بفرستم برای همراه فوری
+هر دوشنبه ساعت ۹ گزارش هفتگی رو بفرستم برای نوا فوری
 یه تسک بساز که شیر بخرم
 قسط وام رو تا پنجم دی بدم شماره حساب ۱۲۳۴۵۶
-review the PR for Hamrah before Friday no I mean before Thursday
+review the PR for Nova before Friday no I mean before Thursday
 ساعت سه و نیم دندونپزشکی
 ثبت نام کلاس آلمانی هفته بعد سه شنبه
 book flights to Tehran for Nowruz
@@ -23,7 +23,7 @@ book flights to Tehran for Nowruz
 next Monday 9am standup with the Acme team, 15 minutes
 فردا عصر باشگاه
 یادم بنداز یه ربع به هفت به بابا زنگ بزنم
-تا آخر هفته فاکتورهای همراه رو بفرستم
+تا آخر هفته فاکتورهای نوا رو بفرستم
 buy milk eggs and bread and also call the plumber
 پس فردا ساعت ۸ کلاس Kubernetes
 اول فروردین ۱۴۰۶ سفر شمال
