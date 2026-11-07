@@ -8,11 +8,14 @@
 //! the key comes from the usual places (keys file, MIRZA_<ID>_API_KEY).
 //!
 //! The rest use Google with the settings and the queue the app uses:
-//!   task login [--client client.json]   sign in (paste the final address if no browser)
+//!   task login [--client client.json] [--wait MINUTES]
+//!                                       sign in (paste the final address if no browser)
 //!   task lists                          the account's lists
 //!   task add "call Sara tomorrow at 3"  save a task, as the shortcut does
 //!   task waiting | retry | recent       the queue and the saved tasks
 //!   task undo ID                        take a task back
+//!   task edit ID [--title T] [--note N] [--list ID] [--date 2026-11-09|-] [--time 09:30|-] [--minutes N]
+//!                                       change a task; the rest stays as it is
 //!   task logout
 
 use std::io::BufRead;
@@ -24,7 +27,8 @@ use mirza_core::tasks::{self, List, Store, parse, when};
 use mirza_core::{net, secrets};
 
 const USAGE: &str = "usage: task parse <openai|gemini|claude|openrouter|local> [--model M] [--effort E] [--lists A,B] [--now ZONED] [--pause ms] [text]
-       task login [--client FILE] | lists | add TEXT | waiting | retry | recent | undo ID | logout";
+       task login [--client FILE] [--wait MINUTES] | lists | add TEXT | waiting | retry | recent | undo ID | logout
+       task edit ID [--title T] [--note N] [--list ID] [--date YYYY-MM-DD|-] [--time HH:MM|-] [--minutes N]";
 
 #[tokio::main]
 async fn main() {
@@ -43,7 +47,7 @@ async fn main() {
             let cfg = Config::load(&config::config_path()).unwrap_or_default();
             tasks::sign_out(&cfg, &Store::new(Store::default_dir())).await.map(|_| println!("Signed out."))
         }
-        "lists" | "add" | "waiting" | "retry" | "recent" | "undo" => google_cmd(&cmd, args.collect()).await,
+        "lists" | "add" | "waiting" | "retry" | "recent" | "undo" | "edit" => google_cmd(&cmd, args.collect()).await,
         _ => Err(USAGE.to_owned()),
     };
     if let Err(e) = r {
@@ -54,11 +58,18 @@ async fn main() {
 
 async fn login(mut args: impl Iterator<Item = String>) -> Result<(), String> {
     let path = config::config_path();
-    if let (Some("--client"), Some(file)) = (args.next().as_deref(), args.next()) {
-        let text = std::fs::read_to_string(&file).map_err(|e| format!("{file}: {e}"))?;
-        let (id, secret) = tasks::settings::read_client(&text)?;
-        tasks::settings::save_client(&path, &id, secret.as_deref()).map_err(|e| e.to_string())?;
-        println!("Client saved (secret: {}).", if secret.is_some() { "yes" } else { "none" });
+    let mut wait = tasks::SIGN_IN_WAIT;
+    while let Some(a) = args.next() {
+        match (a.as_str(), args.next()) {
+            ("--client", Some(file)) => {
+                let text = std::fs::read_to_string(&file).map_err(|e| format!("{file}: {e}"))?;
+                let (id, secret) = tasks::settings::read_client(&text)?;
+                tasks::settings::save_client(&path, &id, secret.as_deref()).map_err(|e| e.to_string())?;
+                println!("Client saved (secret: {}).", if secret.is_some() { "yes" } else { "none" });
+            }
+            ("--wait", Some(m)) => wait = Duration::from_secs(60 * m.parse::<u64>().map_err(|_| USAGE)?),
+            _ => return Err(USAGE.into()),
+        }
     }
     let cfg = Config::load(&path).map_err(|e| e.to_string())?;
     let (tx, rx) = tokio::sync::mpsc::channel(1);
@@ -73,7 +84,7 @@ async fn login(mut args: impl Iterator<Item = String>) -> Result<(), String> {
         println!("Open this address and sign in:\n\n{url}\n");
         println!("If the browser is on another device, paste the address it ends up at here.");
     };
-    let g = tasks::sign_in(&cfg, show, rx).await?;
+    let g = tasks::sign_in_waiting(&cfg, show, rx, wait).await?;
     println!("Signed in. Calendar events: {}.", if g.calendar() { "yes" } else { "no (tasks only)" });
     Ok(())
 }
@@ -130,6 +141,39 @@ async fn google_cmd(cmd: &str, args: Vec<String>) -> Result<(), String> {
             let id = args.first().ok_or(USAGE)?;
             book.undo(&setup, id).await?;
             println!("Undone.");
+        }
+        "edit" => {
+            let (id, rest) = args.split_first().ok_or(USAGE)?;
+            let d = book
+                .waiting()
+                .into_iter()
+                .find(|e| &e.id == id)
+                .and_then(|e| e.draft)
+                .or_else(|| book.recent().into_iter().find(|s| &s.id == id).map(|s| s.draft))
+                .ok_or("No such task, or the AI hasn't read it yet.")?;
+            let mut e = tasks::Edit {
+                title: d.title,
+                note: d.note,
+                list: d.list,
+                date: d.date,
+                time: d.time,
+                minutes: d.minutes,
+            };
+            let mut rest = rest.iter();
+            while let (Some(k), Some(v)) = (rest.next(), rest.next()) {
+                match k.as_str() {
+                    "--title" => e.title = v.clone(),
+                    "--note" => e.note = v.clone(),
+                    "--list" => e.list = v.clone(),
+                    "--date" if v == "-" => e.date = None,
+                    "--date" => e.date = Some(when::parse_date(v).ok_or("bad date")?),
+                    "--time" if v == "-" => e.time = None,
+                    "--time" => e.time = Some(when::parse_time(v).ok_or("bad time")?),
+                    "--minutes" => e.minutes = v.parse().map_err(|_| "bad minutes")?,
+                    _ => return Err(USAGE.into()),
+                }
+            }
+            print(&book.edit(&setup, id, e).await?);
         }
         _ => return Err(USAGE.into()),
     }

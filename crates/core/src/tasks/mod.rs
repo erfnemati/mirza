@@ -606,6 +606,9 @@ pub fn notification(o: &Outcome, lists: &[List], today: Date) -> Option<(String,
     }
 }
 
+/// How long a sign-in waits for the browser to come back.
+pub const SIGN_IN_WAIT: Duration = Duration::from_secs(300);
+
 /// Signs in to Google with the client in the settings and keeps the refresh
 /// token like an API key. `show` gets the address to open (it should open
 /// the browser); `pasted` may bring the address the browser ended at.
@@ -614,11 +617,21 @@ pub async fn sign_in(
     show: impl FnOnce(&str),
     pasted: tokio::sync::mpsc::Receiver<String>,
 ) -> Result<oauth::Granted, String> {
+    sign_in_waiting(cfg, show, pasted, SIGN_IN_WAIT).await
+}
+
+/// [`sign_in`], waiting up to `wait` for the browser.
+pub async fn sign_in_waiting(
+    cfg: &crate::config::Config,
+    show: impl FnOnce(&str),
+    pasted: tokio::sync::mpsc::Receiver<String>,
+    wait: Duration,
+) -> Result<oauth::Granted, String> {
     let (id, secret) = cfg.tasks.client().ok_or(NO_CLIENT)?;
     let ep = Endpoints::default();
     let attempt = oauth::start(&ep, &id).await.map_err(|e| format!("Can't start the sign-in: {e}"))?;
     show(&attempt.url);
-    let code = attempt.code(pasted, Duration::from_secs(300)).await?;
+    let code = attempt.code(pasted, wait).await?;
     let proxy = crate::net::resolve_proxy(&cfg.proxy).map_err(|e| e.to_string())?;
     let http = crate::usage::http_client(proxy.as_ref(), Duration::from_secs(30))?;
     let granted = attempt.exchange(&http, &ep, &id, secret.as_deref(), &code).await.map_err(|e| e.to_string())?;
