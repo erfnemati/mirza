@@ -301,6 +301,23 @@ impl MirzaCore {
         })
     }
 
+    /// The voice tasks, kept in `data_dir` (the app's private files), with these settings and
+    /// keys; `time_zone` is the phone's, e.g. "Europe/Berlin". Call [`MirzaCore::update_task_book`]
+    /// after a setting or key changed.
+    pub fn task_book(
+        &self,
+        data_dir: String,
+        time_zone: String,
+        tokens: Box<dyn tasks::GoogleTokens>,
+    ) -> Result<Arc<tasks::TaskBook>, MobileError> {
+        tasks::TaskBook::create(&self.config(), &self.store, &data_dir, time_zone, tokens)
+    }
+
+    /// Hands changed settings or keys (or a new time zone) to the voice tasks.
+    pub fn update_task_book(&self, book: Arc<tasks::TaskBook>, time_zone: String) -> Result<(), MobileError> {
+        book.reload(&self.config(), &self.store, time_zone)
+    }
+
     /// Asks GitHub for the latest release, through the proxy setting; None when this app is the
     /// newest. Blocks, so call it off the main thread.
     pub fn newer_release(&self) -> Result<Option<Release>, MobileError> {
