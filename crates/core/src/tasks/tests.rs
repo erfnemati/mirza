@@ -187,7 +187,8 @@ async fn offline_tasks_wait_and_are_saved_later() {
     assert!(entry.next_try_ms > jiff::Timestamp::now().as_millisecond() + 20_000);
     assert!(reason.contains("Google"), "{reason}");
     let (_, body) = notification(&Outcome::Waiting { entry: entry.clone(), reason }, &[], date(2026, 11, 6)).unwrap();
-    assert!(body.ends_with("Mirza tries again by itself."), "{body}");
+    assert!(body.ends_with("Mirza tries again soon."), "{body}");
+    assert!(!body.contains("by itself"), "said once is enough: {body}");
     // Not due yet, so a tick does nothing.
     assert!(b.process_due(&s).await.is_empty());
     assert_eq!(b.waiting().len(), 1);

@@ -595,10 +595,12 @@ pub fn notification(o: &Outcome, lists: &[List], today: Date) -> Option<(String,
             });
             let title = format!("Task kept, not saved yet: {words}");
             let tail = match o {
+                // Most reasons already say so.
+                Outcome::Waiting { .. } if reason.contains("tries again") => "",
                 Outcome::Waiting { .. } => "Mirza tries again by itself.",
                 _ => "It's kept until then.",
             };
-            Some((title, format!("{reason} {tail}")))
+            Some((title, format!("{reason} {tail}").trim_end().to_owned()))
         }
         Outcome::Gone(_) => None,
     }
