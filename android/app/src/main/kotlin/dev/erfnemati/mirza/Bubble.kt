@@ -1,7 +1,8 @@
 package dev.erfnemati.mirza
 
+import android.accessibilityservice.AccessibilityService
 import android.annotation.SuppressLint
-import android.content.Context
+import android.content.Intent
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
@@ -12,41 +13,41 @@ import android.widget.ImageView
 import kotlin.math.hypot
 
 /**
- * The floating button. Tap: start or stop dictation. Drag: move it. Long
- * press: type a test sentence into the focused field (trial only). Size, logo,
- * opacity and more gestures come with the real app.
- *
- * `type` is TYPE_APPLICATION_OVERLAY (needs SYSTEM_ALERT_WINDOW) or
- * TYPE_ACCESSIBILITY_OVERLAY (only from an accessibility service's context).
+ * The floating button, drawn by the typing service as an accessibility overlay (it also shows on
+ * the lock screen). Tap: start or stop dictation. Drag: move it; the place is kept. Long press:
+ * open Mirza for now (gestures become settings later).
  */
 @SuppressLint("ClickableViewAccessibility")
-class Bubble(private val ctx: Context, type: Int) {
-    private val wm = ctx.getSystemService(WindowManager::class.java)
-    private val size = ctx.dp(56)
+class Bubble(private val svc: AccessibilityService) {
+    private val wm = svc.getSystemService(WindowManager::class.java)
+    private val size = svc.dp(56)
     private val circle = GradientDrawable().apply { shape = GradientDrawable.OVAL }
-    private val view = ImageView(ctx).apply {
+    private val view = ImageView(svc).apply {
         setImageResource(R.drawable.ic_mic)
         scaleType = ImageView.ScaleType.CENTER
         background = circle
+        elevation = svc.dp(4).toFloat()
         contentDescription = "Mirza: start or stop dictation"
     }
+    private val prefs = svc.getSharedPreferences("state", 0)
     private val lp = WindowManager.LayoutParams(
         size,
         size,
-        type,
-        // Not focusable: the keyboard and the focused field stay in the other app.
+        WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+        // Not focusable: the keyboard and the focused field stay with the other app.
         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
         PixelFormat.TRANSLUCENT,
     ).apply {
         gravity = Gravity.TOP or Gravity.START
-        x = ctx.resources.displayMetrics.widthPixels - size - ctx.dp(8)
-        y = ctx.resources.displayMetrics.heightPixels / 3
+        val screen = svc.resources.displayMetrics
+        x = prefs.getInt("bubble_x", screen.widthPixels - size - svc.dp(8))
+        y = prefs.getInt("bubble_y", screen.heightPixels / 3)
     }
     private val onState: (Session.State) -> Unit = { paint(it) }
     private var shown = false
 
     init {
-        val slop = ViewConfiguration.get(ctx).scaledTouchSlop
+        val slop = ViewConfiguration.get(svc).scaledTouchSlop
         val longPress = ViewConfiguration.getLongPressTimeout().toLong()
         var downX = 0f
         var downY = 0f
@@ -56,9 +57,7 @@ class Bubble(private val ctx: Context, type: Int) {
         var longPressed = false
         val longPressAction = Runnable {
             longPressed = true
-            TrialLog.add("long press: typing the test sentence")
-            val svc = TypingService.instance
-            TrialLog.add(svc?.type(TEST_SENTENCE) ?: "NOT TYPED: the accessibility service is off")
+            svc.startActivity(Intent(svc, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
         view.setOnTouchListener { v, e ->
             when (e.actionMasked) {
@@ -86,7 +85,11 @@ class Bubble(private val ctx: Context, type: Int) {
                 }
                 MotionEvent.ACTION_UP -> {
                     v.removeCallbacks(longPressAction)
-                    if (!dragging && !longPressed) Session.toggle(ctx, "bubble")
+                    if (dragging) {
+                        prefs.edit().putInt("bubble_x", lp.x).putInt("bubble_y", lp.y).apply()
+                    } else if (!longPressed) {
+                        Session.toggle()
+                    }
                 }
                 MotionEvent.ACTION_CANCEL -> v.removeCallbacks(longPressAction)
             }
@@ -103,7 +106,7 @@ class Bubble(private val ctx: Context, type: Int) {
             paint(Session.state)
             true
         } catch (e: Exception) {
-            TrialLog.add("ERROR the bubble couldn't be shown: ${describe(e)}")
+            AppLog.add("the bubble couldn't be shown: ${describe(e)}")
             false
         }
     }
@@ -121,13 +124,8 @@ class Bubble(private val ctx: Context, type: Int) {
                 Session.State.IDLE -> 0xFF455A64.toInt()
                 Session.State.STARTING -> 0xFFFFA000.toInt()
                 Session.State.LISTENING -> 0xFFD32F2F.toInt()
-                Session.State.STOPPING -> 0xFF7B1FA2.toInt()
+                Session.State.FINISHING -> 0xFF7B1FA2.toInt()
             },
         )
-    }
-
-    companion object {
-        /** Persian with half-spaces (U+200C) and English in one sentence. */
-        const val TEST_SENTENCE = "می‌خواهم این test را با Mirza امتحان کنم؛ کتاب‌ها و API‌ها. "
     }
 }

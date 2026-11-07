@@ -2619,6 +2619,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "webpki-roots 1.0.9",
  "windows-sys 0.61.2",
 ]
 
@@ -2657,8 +2658,12 @@ name = "mirza-mobile"
 version = "0.1.5"
 dependencies = [
  "mirza-core",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
  "tokio",
+ "toml 1.1.6+spec-1.1.0",
+ "toml_edit 0.25.15+spec-1.1.0",
  "uniffi",
 ]
 

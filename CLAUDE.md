@@ -36,10 +36,12 @@ in:
 
 - `scripts/dev/virtual-mic.sh start`, then `play clip.m4a`: audio files come out of the default
   microphone, for Mirza's Linux recorder and for the emulator.
-- `scripts/dev/emulator.sh start | wait | screen F.png | stop`: an Android 16 emulator (SDK in
+- `scripts/dev/emulator.sh start | wait | mic | screen F.png | stop`: an Android 16 emulator (SDK in
   `~/Android/Sdk`) on a virtual screen. With KVM a cold boot takes about 2 minutes (snapshots
   stay off); stop it when you're done, the server is shared. Without KVM the script falls back to
-  software emulation, which takes 7 to 30 minutes to boot and whose microphone goes silent.
+  software emulation, which takes 7 to 30 minutes to boot and whose microphone goes silent. Run
+  `mic` before each recording: the emulator turns its host microphone off by itself. In tests,
+  `uiautomator dump` pauses accessibility services, so Mirza's typing stops while it runs.
 
 Shortcuts, typing into desktop windows and the tray still need a real desktop, and the emulator
 says nothing about how the app feels on a real phone: say what was tested where. Desktop builds for manual
@@ -53,7 +55,7 @@ tests come from the Release workflow run by hand (workflow artifacts).
   them ready once, after merging the latest `develop`. Pushing a branch runs no CI; only Rust
   changes do.
 - Release: bump `version` in the root `Cargo.toml`, merge `develop` into `main`, tag `vX.Y.Z`; the
-  Release workflow builds the installers. Only when Erfan asks.
+  Release workflow builds the installers. Only when the owner asks.
 - No AI attribution in commits or PRs (no Co-Authored-By trailer). Older commits have one; don't
   copy it.
 - Every network call goes through the proxy setting (`net::connect_ws`, `usage::http_client`).

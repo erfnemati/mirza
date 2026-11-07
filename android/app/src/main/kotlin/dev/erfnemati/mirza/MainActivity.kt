@@ -1,315 +1,163 @@
 package dev.erfnemati.mirza
 
 import android.Manifest
-import android.app.Activity
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.ComponentName
-import android.content.Context
+import android.content.ActivityNotFoundException
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.graphics.Typeface
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
-import android.text.Editable
-import android.text.InputType
-import android.text.TextWatcher
-import android.view.View
-import android.view.WindowInsets
-import android.widget.Button
-import android.widget.CheckBox
-import android.widget.EditText
-import android.widget.LinearLayout
-import android.widget.RadioButton
-import android.widget.RadioGroup
-import android.widget.ScrollView
-import android.widget.TextView
-import android.widget.Toast
-
-/** Showing and hiding the bubble, the same way from the screen and from adb. */
-object BubbleControl {
-    fun show(ctx: Context): String? {
-        if (Prefs.micMode == MicMode.ALWAYS &&
-            ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
-        ) {
-            return "Mode C needs the microphone permission first."
-        }
-        when (Prefs.host) {
-            BubbleHost.OVERLAY -> {
-                if (!Settings.canDrawOverlays(ctx)) return "Allow drawing over other apps first (step 2)."
-            }
-            BubbleHost.ACCESSIBILITY -> {
-                val svc = TypingService.instance ?: return "Turn on Mirza trial typing in Accessibility first (step 3)."
-                svc.showBubble()
-            }
-        }
-        Prefs.bubbleOn = true
-        // The overlay host needs the service for its window; modes A and C need
-        // it for the microphone whatever the host is.
-        if (Prefs.host == BubbleHost.OVERLAY || Prefs.micMode == MicMode.PROMOTE || Prefs.micMode == MicMode.ALWAYS) {
-            try {
-                ctx.startForegroundService(Intent(ctx, BubbleService::class.java))
-            } catch (e: Exception) {
-                TrialLog.add("startForegroundService(BubbleService) REFUSED: ${describe(e)}")
-                return "Android refused to start the bubble service; see the log."
-            }
-        }
-        return null
-    }
-
-    fun hide(ctx: Context) {
-        Prefs.bubbleOn = false
-        Session.cancel("bubble hidden")
-        ctx.stopService(Intent(ctx, BubbleService::class.java))
-        TypingService.instance?.hideBubble()
-        TrialLog.add("bubble hidden")
-    }
-}
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 
 /**
- * The trial's only screen: permissions, the Soniox key, the experiment
- * modes, and the log of what happened.
+ * The settings app: setup checklist, status and settings. Kept out of recents (manifest): Xiaomi
+ * force-stops an app swiped away there, which turns typing off.
  */
-class MainActivity : Activity() {
-    private lateinit var status: TextView
-    private lateinit var fixTyping: Button
-    private lateinit var log: TextView
+class MainActivity : ComponentActivity(), Actions {
+    /** Bumped when the activity comes back, since permissions and Accessibility change outside the app. */
+    private var resumes by mutableIntStateOf(0)
+    private var screen by mutableStateOf(Screen.HOME)
+    private var asked: String? = null
 
-    // The typing service logs when it connects, so the status follows the log.
-    private val refreshLog = Runnable {
-        log.text = TrialLog.text()
-        refreshStatus()
+    private val askPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val perm = asked
+        if (!granted && perm != null && !shouldShowRequestPermissionRationale(perm)) {
+            // Denied for good: only App info can change it now.
+            toast("Allow it in App info, under Permissions.")
+            appInfo()
+        }
+        resumes++
     }
 
+    @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(8), dp(16), dp(24))
-        }
-        val scroll = ScrollView(this).apply { addView(root) }
-        if (Build.VERSION.SDK_INT >= 30) {
-            // Android 15+ draws apps edge to edge; keep the content clear of the bars and the keyboard.
-            scroll.setOnApplyWindowInsetsListener { v, insets ->
-                val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.ime())
-                v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
-                WindowInsets.CONSUMED
+        savedInstanceState?.getString("screen")?.let { screen = Screen.valueOf(it) }
+        Updates.onOpen()
+        setContent {
+            MirzaTheme {
+                resumes.let { } // read, so the checklist is checked again on resume
+                val steps = Setup.steps(this)
+                BackHandler(enabled = screen != Screen.HOME) { screen = Screen.HOME }
+                Scaffold(
+                    topBar = {
+                        TopAppBar(
+                            title = { Text(screen.title) },
+                            navigationIcon = {
+                                if (screen != Screen.HOME) {
+                                    IconButton(onClick = { screen = Screen.HOME }) {
+                                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                                    }
+                                }
+                            },
+                        )
+                    },
+                ) { pad ->
+                    AnimatedContent(
+                        targetState = screen,
+                        transitionSpec = { fadeIn() togetherWith fadeOut() },
+                        label = "screen",
+                        modifier = Modifier.padding(pad),
+                    ) { shown ->
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                                .padding(16.dp),
+                        ) {
+                            when (shown) {
+                                Screen.HOME -> HomeScreen(steps, this@MainActivity)
+                                Screen.SPEECH -> SpeechScreen(this@MainActivity)
+                                Screen.GENERAL -> GeneralScreen()
+                                Screen.ABOUT -> AboutScreen(this@MainActivity)
+                            }
+                        }
+                    }
+                }
             }
         }
-        setContentView(scroll)
+    }
 
-        status = TextView(this).apply { setTextIsSelectable(true) }
-        root.addView(heading("Status"))
-        root.addView(status)
-        fixTyping = button("") { openTypingSettings() }
-        root.addView(fixTyping)
-
-        root.addView(heading("Set up"))
-        root.addView(button("1. Allow microphone and notifications") { askPermissions() })
-        root.addView(button("2. Allow drawing over other apps") {
-            open(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
-        })
-        root.addView(button("3. Turn on \"Mirza trial typing\" in Accessibility") { openTypingSettings() })
-        val xiaomi = Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true)
-        val battery = if (xiaomi) "; Battery saver > No restrictions" else ""
-        root.addView(button("App info (⋮ > Allow restricted settings$battery)") {
-            open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
-        })
-        if (xiaomi) {
-            root.addView(button("Xiaomi: Autostart (lets Android restart typing)") {
-                open(Intent().setClassName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"))
-            })
-            root.addView(button("Xiaomi: other permissions (pop-up windows in background)") {
-                open(
-                    Intent("miui.intent.action.APP_PERM_EDITOR")
-                        .setClassName("com.miui.securitycenter", "com.miui.permcenter.permissions.PermissionsEditorActivity")
-                        .putExtra("extra_pkgname", packageName),
-                )
-            })
-        }
-
-        root.addView(heading("Soniox"))
-        root.addView(field("API key (empty: microphone test only)", Prefs.apiKey, secret = true) { Prefs.apiKey = it })
-        root.addView(field("Proxy: empty for none, or http:// or socks5:// URL", Prefs.proxy) { Prefs.proxy = it })
-        root.addView(field("Language hints", Prefs.languages) { Prefs.languages = it })
-        root.addView(field("Model (empty: stt-rt-v6)", Prefs.model) { Prefs.model = it })
-
-        root.addView(heading("Experiment"))
-        root.addView(choice("Bubble", BubbleHost.entries.map { it.label }, Prefs.host.ordinal) {
-            Prefs.host = BubbleHost.entries[it]
-            modesChanged()
-        })
-        root.addView(choice("Microphone on tap", MicMode.entries.map { it.label }, Prefs.micMode.ordinal) {
-            Prefs.micMode = MicMode.entries[it]
-            modesChanged()
-        })
-        root.addView(choice("Typing", TypingMethod.entries.map { it.label }, Prefs.typing.ordinal) {
-            Prefs.typing = TypingMethod.entries[it]
-        })
-        root.addView(CheckBox(this).apply {
-            text = "Show recognized text in the log"
-            isChecked = Prefs.logText
-            setOnCheckedChangeListener { _, on -> Prefs.logText = on }
-        })
-        root.addView(button("Show bubble") {
-            BubbleControl.show(this)?.let { toast(it) }
-            refreshStatus()
-        })
-        root.addView(button("Hide bubble") {
-            BubbleControl.hide(this)
-            refreshStatus()
-        })
-
-        root.addView(heading("Log"))
-        val row = LinearLayout(this)
-        row.addView(button("Copy log") {
-            getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Mirza trial log", TrialLog.text()))
-            toast("Log copied")
-        })
-        row.addView(button("Clear log") { TrialLog.clear() })
-        root.addView(row)
-        log = TextView(this).apply {
-            typeface = Typeface.MONOSPACE
-            textSize = 11f
-            setTextIsSelectable(true)
-        }
-        root.addView(log)
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString("screen", screen.name)
     }
 
     override fun onResume() {
         super.onResume()
-        refreshStatus()
-        TrialLog.listeners.add(refreshLog)
-        refreshLog.run()
+        resumes++
     }
 
-    override fun onPause() {
-        TrialLog.listeners.remove(refreshLog)
-        super.onPause()
-    }
-
-    private fun modesChanged() {
-        if (Prefs.bubbleOn) {
-            BubbleControl.hide(this)
-            toast("Modes changed: show the bubble again")
-        }
-        refreshStatus()
-    }
-
-    private fun refreshStatus() {
-        fun yes(b: Boolean) = if (b) "yes" else "NO"
-        val mic = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-        val notes = Build.VERSION.SDK_INT < 33 ||
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-        status.text = buildString {
-            appendLine("${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
-            appendLine("Trial ${BuildConfig.VERSION_NAME}, core ${dev.erfnemati.mirza.core.coreVersion()}")
-            appendLine("Microphone allowed: ${yes(mic)}")
-            appendLine("Notifications allowed: ${yes(notes)}")
-            appendLine("Drawing over other apps allowed: ${yes(Settings.canDrawOverlays(this@MainActivity))}")
-            appendLine("Typing service running: ${yes(TypingService.instance != null)}")
-            appendLine("Soniox key set: ${yes(Prefs.apiKey.isNotEmpty())}")
-            append("Bubble: ${if (Prefs.bubbleOn) "shown" else "hidden"}")
-        }
-        val fix = typingFix()
-        fixTyping.visibility = if (fix == null) View.GONE else View.VISIBLE
-        if (fix != null) fixTyping.text = fix
-    }
-
-    /** The typing service's state, and a button to fix it when it isn't running. */
-    private fun typingFix(): String? = when {
-        TypingService.instance != null -> null
-        TypingService.enabledInSettings(this) ->
-            "Typing is on in Accessibility but not running: turn \"Mirza trial typing\" off and on there"
-        else -> "Typing is off (closing the app from recents can do that): turn on \"Mirza trial typing\""
-    }
-
-    /**
-     * The accessibility settings, with Mirza marked where the phone supports that. Mirza's own page
-     * there (ACCESSIBILITY_DETAILS_SETTINGS) needs a system permission, so apps can't open it.
-     */
-    private fun openTypingSettings() {
-        val name = ComponentName(this, TypingService::class.java).flattenToString()
-        val highlight = Bundle().apply { putString(":settings:fragment_args_key", name) }
-        open(
-            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                .putExtra(":settings:fragment_args_key", name)
-                .putExtra(":settings:show_fragment_args", highlight),
-        )
-    }
-
-    private fun askPermissions() {
-        val perms = mutableListOf(Manifest.permission.RECORD_AUDIO)
-        if (Build.VERSION.SDK_INT >= 33) perms += Manifest.permission.POST_NOTIFICATIONS
-        requestPermissions(perms.toTypedArray(), 1)
-    }
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        refreshStatus()
-    }
-
-    private fun open(intent: Intent) {
-        try {
-            startActivity(intent)
-        } catch (e: Exception) {
-            toast("This phone doesn't have that screen")
-            TrialLog.add("couldn't open ${intent.action ?: intent.component}: ${describe(e)}")
+    override fun fix(step: Step) {
+        when (step.fix) {
+            Fix.MIC -> ask(Manifest.permission.RECORD_AUDIO)
+            Fix.NOTIFICATIONS -> ask(Manifest.permission.POST_NOTIFICATIONS)
+            Fix.TYPING, Fix.TRIAL -> start(Setup.accessibilityIntent(this))
+            Fix.KEY -> go(Screen.SPEECH)
+            Fix.AUTOSTART -> if (!start(Setup.autostartIntent())) appInfo()
+            Fix.BATTERY -> appInfo()
         }
     }
 
-    private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
-
-    private fun heading(text: String) = TextView(this).apply {
-        this.text = text
-        textSize = 18f
-        setTypeface(typeface, Typeface.BOLD)
-        setPadding(0, dp(16), 0, dp(4))
+    override fun tick(step: Step) {
+        Setup.tick(step.fix)
+        resumes++
     }
 
-    private fun button(text: String, onClick: () -> Unit) = Button(this).apply {
-        this.text = text
-        isAllCaps = false
-        setOnClickListener { onClick() }
+    override fun appInfo() {
+        start(Setup.appInfoIntent(this))
     }
 
-    private fun field(hint: String, value: String, secret: Boolean = false, onChange: (String) -> Unit) =
-        EditText(this).apply {
-            this.hint = hint
-            setText(value)
-            isSingleLine = true
-            inputType = if (secret) {
-                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            } else {
-                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            }
-            addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+    override fun open(url: String) {
+        if (!start(Intent(Intent.ACTION_VIEW, Uri.parse(url)))) toast("No browser to open $url")
+    }
 
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+    override fun go(screen: Screen) {
+        this.screen = screen
+    }
 
-                override fun afterTextChanged(s: Editable?) = onChange(s?.toString() ?: "")
-            })
-        }
+    private fun ask(perm: String) {
+        asked = perm
+        askPermission.launch(perm)
+    }
 
-    private fun choice(title: String, options: List<String>, selected: Int, onChange: (Int) -> Unit): View {
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        box.addView(TextView(this).apply {
-            text = title
-            setPadding(0, dp(8), 0, 0)
-        })
-        val group = RadioGroup(this)
-        options.forEachIndexed { i, label ->
-            group.addView(RadioButton(this).apply {
-                id = View.generateViewId()
-                text = label
-                isChecked = i == selected
-                setOnClickListener { onChange(i) }
-            })
-        }
-        box.addView(group)
-        return box
+    private fun start(i: Intent): Boolean = try {
+        startActivity(i)
+        true
+    } catch (e: ActivityNotFoundException) {
+        AppLog.add("couldn't open ${i.action ?: i.component}: ${describe(e)}")
+        false
+    } catch (e: SecurityException) {
+        AppLog.add("couldn't open ${i.action ?: i.component}: ${describe(e)}")
+        false
     }
 }
