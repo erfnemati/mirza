@@ -298,6 +298,9 @@ impl Google {
             let mut rb = self.http.request(method.clone(), url).bearer_auth(&token);
             if let Some(b) = body {
                 rb = rb.json(b);
+            } else if method == reqwest::Method::POST {
+                // Google answers a POST without a length (a move) with 411.
+                rb = rb.header(reqwest::header::CONTENT_LENGTH, 0);
             }
             let resp = rb.send().await.map_err(|e| self.request_error(api, &e))?;
             let status = resp.status().as_u16();
@@ -619,5 +622,7 @@ mod tests {
         let seen = mock.seen();
         assert!(seen[1].target.starts_with("/tasks/v1/lists/L1/tasks?updatedMin=2026-11-06T"), "{}", seen[1].target);
         assert_eq!(seen[2].target, "/tasks/v1/lists/L1/tasks/T9/move?destinationTasklist=L2");
+        let length = seen[2].headers.iter().find(|(k, _)| k == "content-length").map(|(_, v)| v.as_str());
+        assert_eq!(length, Some("0"), "Google refuses a POST without a length");
     }
 }
