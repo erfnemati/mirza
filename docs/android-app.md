@@ -322,7 +322,7 @@ From PR 5 (release):
 - [ ] Install the release candidate from the browser on the phone, following
       [install-android.md](install-android.md) step by step; fix the guide where the phone says
       something else (Play Protect's buttons, the restricted-setting menu, Xiaomi's names).
-- [ ] About shows the version; "Check for updates" on the General screen says it is up to date.
+- [ ] About shows the version, and its "Check for updates" says Mirza is up to date.
 - [ ] Once the next version is out: opening Mirza shows the update card, it opens the release page,
       and the new APK installs over the old one with settings, keys and the Google sign-in kept.
 
