@@ -29,13 +29,15 @@ import kotlin.math.max
  * One dictation at a time: starts the microphone service, records, streams the audio to the
  * speech service through the Rust core, and types what comes back. Plain dictation types as the
  * words settle; revised dictation waits for the end, has the AI revise the whole text, and types
- * that. Text that can't be typed ends up in the clipboard, so nothing is lost. Everything here
- * runs on the main thread.
+ * that. Text that can't be typed ends up in the clipboard, so nothing is lost. A task types
+ * nothing: what was said goes to [VoiceTasks]. On the lock screen every recording is a task that
+ * waits there until the phone is unlocked and the task confirmed. Everything here runs on the
+ * main thread.
  */
 object Session {
     enum class State { IDLE, STARTING, LISTENING, FINISHING }
 
-    enum class Mode { DICTATE, REVISE }
+    enum class Mode { DICTATE, REVISE, TASK }
 
     /** Compose state, so the home screen shows it; the bubble listens through [stateListeners]. */
     var state by mutableStateOf(State.IDLE)
@@ -50,6 +52,13 @@ object Session {
     private var warnedSilent = false
 
     var mode = Mode.DICTATE
+        private set
+
+    /** A task said on the lock screen: it waits for confirmation after unlocking. */
+    private var held = false
+
+    /** Compose state for the task panel: what was heard so far, with the provider's guess at the end. */
+    var live by mutableStateOf("")
         private set
 
     /** What the speech service heard in this session. */
@@ -91,7 +100,12 @@ object Session {
         when (state) {
             State.IDLE -> start(mode)
             State.STARTING, State.LISTENING -> stop("tap")
-            State.FINISHING -> if (this.mode == Mode.REVISE) skipRevision() else cancel("tap while finishing")
+            State.FINISHING -> when (this.mode) {
+                Mode.REVISE -> skipRevision()
+                // What was said is about to become a task; a tap mustn't lose it.
+                Mode.TASK -> {}
+                Mode.DICTATE -> cancel("tap while finishing")
+            }
         }
     }
 
@@ -105,8 +119,12 @@ object Session {
     fun switchMode(newMode: Mode): Boolean {
         if (state == State.IDLE || state == State.FINISHING || typedAny) return false
         if (mode == newMode) return true
+        // On the lock screen, or with no field to type into, it stays a task.
+        if (mode == Mode.TASK && (held || TypingService.instance?.hasField() != true)) return false
         AppLog.add("switched to ${newMode.name.lowercase()}")
         mode = newMode
+        if (newMode == Mode.TASK) TypingService.instance?.let { TaskPanel.listen(it) }
+        if (newMode == Mode.TASK) live = heard.toString()
         // Anything heard while it waited for the AI is typed now.
         if (newMode == Mode.DICTATE) deliver(heard.toString())
         return true
@@ -115,19 +133,20 @@ object Session {
     fun start(mode: Mode) {
         val app = MirzaApp.app
         val svc = TypingService.instance ?: return toast("Typing is off: open Mirza to turn it on.")
-        if (svc.locked()) {
-            // Android hides toasts behind the lock screen on many phones: the sound says it.
-            AppLog.add("tap on the lock screen: not recording")
-            Sounds.play(SoundKind.ERROR)
-            return toast("Unlock the phone first. Mirza doesn't type on the lock screen.")
-        }
+        // Mirza never types or acts on the lock screen: what is said there waits as a task.
+        val locked = svc.locked()
         if (app.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            return toast("Mirza needs the microphone: open Mirza to allow it.")
+            return refuse("Mirza needs the microphone: open Mirza to allow it.")
         }
-        if (!svc.hasField()) return toast("Tap into a text field first.")
         val service = Core.settings.activeProvider
-        if (!Core.keySet(service)) return toast("Enter your ${serviceName(service)} API key in Mirza first.")
-        this.mode = mode
+        if (!Core.keySet(service)) return refuse("Enter your ${serviceName(service)} API key in Mirza first.")
+        // With no field to type into, what is said becomes a task.
+        val m = if (locked || !svc.hasField()) Mode.TASK else mode
+        if (locked) AppLog.add("recording on the lock screen: a held task")
+        this.mode = m
+        held = locked
+        live = ""
+        if (m == Mode.TASK && !locked) TaskPanel.listen(svc)
         heard.clear()
         typedAny = false
         untyped.clear()
@@ -188,6 +207,12 @@ object Session {
         AppLog.add("listening (${Core.settings.activeProvider}, ${mode.name.lowercase()})")
     }
 
+    /** Says why it can't start; the sound says it on lock screens that hide toasts. */
+    private fun refuse(msg: String) {
+        Sounds.play(SoundKind.ERROR)
+        toast(msg)
+    }
+
     fun stop(reason: String) {
         val r = recorder
         if (r == null) {
@@ -229,8 +254,12 @@ object Session {
         recorder?.stop()
         recorder = null
         dictation?.cancel()
-        // Revised dictation types nothing until the end: what was heard still goes out.
-        if (mode == Mode.REVISE) deliver(heard.toString().trim())
+        // Revised dictation and tasks use nothing until the end: what was heard still goes out.
+        when (mode) {
+            Mode.REVISE -> deliver(heard.toString().trim())
+            Mode.TASK -> return task(failed = true)
+            Mode.DICTATE -> {}
+        }
         done()
     }
 
@@ -239,6 +268,7 @@ object Session {
         val d = dictation
         dictation = null
         d?.close()
+        if (mode == Mode.TASK) return task()
         if (mode != Mode.REVISE || heard.isBlank()) return done()
         val raw = heard.toString().trim()
         val id = ++revising
@@ -268,6 +298,18 @@ object Session {
         done(text = raw, raw = "")
     }
 
+    /** What was said becomes a task (kept on the phone first), then the session ends. */
+    private fun task(failed: Boolean = false) {
+        val text = heard.toString().trim()
+        when {
+            text.isEmpty() -> if (failed) {} else if (held) Sounds.play(SoundKind.ERROR) else toast("Nothing was heard.")
+            held -> if (!VoiceTasks.hold(text)) Sounds.play(SoundKind.ERROR)
+            else -> VoiceTasks.add(text)
+        }
+        // Tasks stay out of the recent texts: the Voice tasks screen lists them.
+        done(text = "")
+    }
+
     /** Ends the session; `text` (or what was heard) goes into the recent texts. */
     private fun done(text: String = heard.toString().trim(), raw: String = "") {
         main.removeCallbacks(tick)
@@ -286,6 +328,9 @@ object Session {
         }
         if (text.isNotEmpty()) History.add(text, raw)
         heard.clear()
+        live = ""
+        held = false
+        TaskPanel.sessionEnded()
         changeState(State.IDLE)
     }
 
@@ -298,6 +343,7 @@ object Session {
     private fun heard(text: String) {
         lastSpeech = SystemClock.elapsedRealtime()
         heard.append(text)
+        if (mode == Mode.TASK) live = heard.toString()
         if (mode == Mode.DICTATE) deliver(text)
     }
 
@@ -325,7 +371,10 @@ object Session {
         }
 
         override fun onPartial(text: String) {
-            if (text.isNotBlank()) main.post { lastSpeech = SystemClock.elapsedRealtime() }
+            main.post {
+                if (text.isNotBlank()) lastSpeech = SystemClock.elapsedRealtime()
+                if (dictation != null && mode == Mode.TASK) live = heard.toString() + text
+            }
         }
 
         override fun onError(message: String) {

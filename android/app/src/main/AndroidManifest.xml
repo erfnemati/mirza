@@ -32,6 +32,22 @@
             </intent-filter>
         </activity>
 
+        <!-- Voice tasks: what was heard and what became of it, the edit form, and the tasks said on
+             the lock screen. Its own task, so closing it goes back to the app that was in front. -->
+        <activity
+            android:name=".TaskPanelActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:taskAffinity="dev.erfnemati.mirza.panel"
+            android:theme="@style/Theme.Mirza.Panel"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- Undo on a task notification. -->
+        <receiver
+            android:name=".TaskActionReceiver"
+            android:exported="false" />
+
         <!-- Holds the microphone during one dictation. specialUse is only a fallback, so a refused
              microphone start ends cleanly instead of crashing the app. -->
         <service

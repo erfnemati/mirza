@@ -181,7 +181,7 @@ class Bubble(private val svc: AccessibilityService, private val look: BubbleSett
 
     private fun act(g: Gesture) {
         when (g) {
-            Gesture.DICTATE, Gesture.REVISE -> Session.toggle(g.mode)
+            Gesture.DICTATE, Gesture.REVISE, Gesture.TASK -> Session.toggle(g.mode)
             Gesture.OPEN_APP -> openApp()
             Gesture.NONE -> {}
         }
@@ -237,5 +237,9 @@ private const val AMBER = 0xFFFFA000.toInt()
 private const val RED = 0xFFD32F2F.toInt()
 private const val PURPLE = 0xFF7B1FA2.toInt()
 
-/** The dictation mode a recording gesture starts. */
-val Gesture.mode: Session.Mode get() = if (this == Gesture.REVISE) Session.Mode.REVISE else Session.Mode.DICTATE
+/** The mode a recording gesture starts. */
+val Gesture.mode: Session.Mode get() = when (this) {
+    Gesture.REVISE -> Session.Mode.REVISE
+    Gesture.TASK -> Session.Mode.TASK
+    else -> Session.Mode.DICTATE
+}

@@ -22,21 +22,37 @@ use crate::settings::{self, MobileConfig};
 #[uniffi::export(callback_interface)]
 pub trait GoogleTokens: Send + Sync {
     /// A valid access token for the Tasks (and Calendar) scopes; `fresh`
-    /// means Google refused the last one. [`MobileError::Settings`] means the
-    /// user has to sign in; [`MobileError::Network`] that Google couldn't be
-    /// reached now, so the task waits and tries again. The text is a short
-    /// detail; the core writes the sentence around it.
-    fn access_token(&self, fresh: bool) -> Result<String, MobileError>;
+    /// means Google refused the last one.
+    fn access_token(&self, fresh: bool) -> GoogleToken;
+}
+
+/// The app's answer to [`GoogleTokens::access_token`]. An enum rather than an
+/// error, since UniFFI can't carry a flat error from Kotlin back to Rust.
+#[derive(Debug, Clone, PartialEq, uniffi::Enum)]
+pub enum GoogleToken {
+    Token {
+        token: String,
+    },
+    /// The user has to sign in (again). `detail` is a short reason; the core
+    /// writes the sentence around it.
+    SignedOut {
+        detail: String,
+    },
+    /// Google couldn't be reached now, so the task waits and tries again.
+    Offline {
+        detail: String,
+    },
 }
 
 struct Tokens(Box<dyn GoogleTokens>);
 
 impl TokenProvider for Tokens {
     fn access_token(&self, fresh: bool) -> Result<String, TokenError> {
-        self.0.access_token(fresh).map_err(|e| match e {
-            MobileError::Network(d) => TokenError::Network(d),
-            MobileError::Settings(d) => TokenError::SignedOut(d),
-        })
+        match self.0.access_token(fresh) {
+            GoogleToken::Token { token } => Ok(token),
+            GoogleToken::SignedOut { detail } => Err(TokenError::SignedOut(detail)),
+            GoogleToken::Offline { detail } => Err(TokenError::Network(detail)),
+        }
     }
 }
 
@@ -53,12 +69,16 @@ pub struct TaskDraft {
     pub note: String,
     /// List id; "" for the default list.
     pub list: String,
+    /// The list's name, as the app shows it.
+    pub list_name: String,
     /// "2026-11-07", or "" for none.
     pub date: String,
     /// "15:00", or "" for none.
     pub time: String,
     /// Event length if one was said; 0 for the default.
     pub minutes: u32,
+    /// The day and time in words, like "tomorrow 15:00"; "" for none.
+    pub when_text: String,
     /// What was unclear or assumed.
     pub guesses: Vec<String>,
     /// Saved as said, without AI.
@@ -86,7 +106,6 @@ pub struct SavedTask {
     pub id: String,
     pub text: String,
     pub draft: TaskDraft,
-    pub list_name: String,
     pub has_event: bool,
     pub saved_ms: i64,
 }
@@ -126,16 +145,39 @@ pub struct TaskEdit {
     pub minutes: u32,
 }
 
-fn draft_out(d: &Draft) -> TaskDraft {
-    TaskDraft {
-        title: d.title.clone(),
-        note: d.note.clone(),
-        list: d.list.clone(),
-        date: d.date.map(|x| x.to_string()).unwrap_or_default(),
-        time: d.time.map(|t| t.strftime("%H:%M").to_string()).unwrap_or_default(),
-        minutes: d.minutes,
-        guesses: d.guesses.clone(),
-        raw: d.raw,
+/// What the app needs to show tasks: the list names and today's date.
+struct View {
+    lists: Vec<tasks::List>,
+    today: jiff::civil::Date,
+}
+
+impl View {
+    fn draft(&self, d: &Draft) -> TaskDraft {
+        TaskDraft {
+            title: d.title.clone(),
+            note: d.note.clone(),
+            list: d.list.clone(),
+            list_name: tasks::list_name(&self.lists, &d.list).to_owned(),
+            date: d.date.map(|x| x.to_string()).unwrap_or_default(),
+            time: d.time.map(|t| t.strftime("%H:%M").to_string()).unwrap_or_default(),
+            minutes: d.minutes,
+            when_text: when::describe(&d.when(), self.today),
+            guesses: d.guesses.clone(),
+            raw: d.raw,
+        }
+    }
+
+    fn waiting(&self, e: &tasks::Entry) -> WaitingTask {
+        WaitingTask {
+            id: e.id.clone(),
+            text: e.text.clone(),
+            said_ms: e.said.at_ms,
+            attempts: e.attempts,
+            next_try_ms: e.next_try_ms,
+            last_error: e.last_error.clone(),
+            draft: e.draft.as_ref().map(|d| self.draft(d)),
+            held: e.held,
+        }
     }
 }
 
@@ -227,8 +269,12 @@ impl TaskBook {
         self.setup.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    fn lists_now(&self) -> Vec<tasks::List> {
-        self.book.store().lists().map(|(_, l)| l).unwrap_or_default()
+    fn view(&self) -> View {
+        let tz = self.time_zone.read().unwrap_or_else(|e| e.into_inner()).clone();
+        View {
+            lists: self.book.store().lists().map(|(_, l)| l).unwrap_or_default(),
+            today: Said::at(jiff_now_ms(), &tz).zoned().date(),
+        }
     }
 
     fn outcome(&self, o: &Outcome) -> TaskOutcome {
@@ -238,8 +284,8 @@ impl TaskBook {
             Outcome::Stuck { entry, .. } => (entry.id.clone(), TaskState::Stuck),
             Outcome::Gone(id) => (id.clone(), TaskState::Gone),
         };
-        let today = Said::at(jiff_now_ms(), &self.time_zone.read().unwrap_or_else(|e| e.into_inner())).zoned().date();
-        let (title, body) = tasks::notification(o, &self.lists_now(), today).unwrap_or_default();
+        let v = self.view();
+        let (title, body) = tasks::notification(o, &v.lists, v.today).unwrap_or_default();
         TaskOutcome { id, state, title, body }
     }
 }
@@ -261,7 +307,7 @@ impl TaskBook {
             .book
             .capture(&text, Said::at(jiff_now_ms(), &tz), false)
             .map_err(|e| MobileError::Settings(format!("Can't keep the task on the phone: {e}")))?;
-        Ok(waiting_out(&e))
+        Ok(self.view().waiting(&e))
     }
 
     /// Keeps a task said on the lock screen, on disk only: nothing goes to
@@ -278,7 +324,7 @@ impl TaskBook {
             n => n as usize,
         };
         let e = self.book.hold(&text, Said::at(jiff_now_ms(), &tz), limit).map_err(MobileError::Settings)?;
-        Ok(waiting_out(&e))
+        Ok(self.view().waiting(&e))
     }
 
     /// Confirms a task kept on the lock screen; then save it with
@@ -292,7 +338,10 @@ impl TaskBook {
     /// anything ("Try it" on the Voice tasks screen). Blocks.
     pub fn preview(&self, text: String) -> Result<TaskDraft, MobileError> {
         let setup = self.setup();
-        runtime().block_on(self.book.preview(&setup, &text)).map(|d| draft_out(&d)).map_err(MobileError::Settings)
+        runtime()
+            .block_on(self.book.preview(&setup, &text))
+            .map(|d| self.view().draft(&d))
+            .map_err(MobileError::Settings)
     }
 
     /// Why tasks are saved word for word right now ("" when an AI reads them).
@@ -327,20 +376,20 @@ impl TaskBook {
     }
 
     pub fn waiting(&self) -> Vec<WaitingTask> {
-        self.book.waiting().iter().map(waiting_out).collect()
+        let v = self.view();
+        self.book.waiting().iter().map(|e| v.waiting(e)).collect()
     }
 
     /// Saved tasks, newest first (the last 20).
     pub fn recent(&self) -> Vec<SavedTask> {
-        let lists = self.lists_now();
+        let v = self.view();
         self.book
             .recent()
             .iter()
             .map(|s| SavedTask {
                 id: s.id.clone(),
                 text: s.text.clone(),
-                draft: draft_out(&s.draft),
-                list_name: tasks::list_name(&lists, &s.draft.list).to_owned(),
+                draft: v.draft(&s.draft),
                 has_event: s.event.is_some(),
                 saved_ms: s.saved_ms,
             })
@@ -380,19 +429,6 @@ impl TaskBook {
     }
 }
 
-fn waiting_out(e: &tasks::Entry) -> WaitingTask {
-    WaitingTask {
-        id: e.id.clone(),
-        text: e.text.clone(),
-        said_ms: e.said.at_ms,
-        attempts: e.attempts,
-        next_try_ms: e.next_try_ms,
-        last_error: e.last_error.clone(),
-        draft: e.draft.as_ref().map(draft_out),
-        held: e.held,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -400,8 +436,8 @@ mod tests {
     struct NoSignIn;
 
     impl GoogleTokens for NoSignIn {
-        fn access_token(&self, _fresh: bool) -> Result<String, MobileError> {
-            Err(MobileError::Settings("Sign in to Google in Mirza first.".into()))
+        fn access_token(&self, _fresh: bool) -> GoogleToken {
+            GoogleToken::SignedOut { detail: String::new() }
         }
     }
 
@@ -419,8 +455,8 @@ mod tests {
     struct Offline;
 
     impl GoogleTokens for Offline {
-        fn access_token(&self, _fresh: bool) -> Result<String, MobileError> {
-            Err(MobileError::Network("no connection".into()))
+        fn access_token(&self, _fresh: bool) -> GoogleToken {
+            GoogleToken::Offline { detail: "no connection".into() }
         }
     }
 
@@ -432,8 +468,7 @@ mod tests {
         let o = book.process(w.id.clone());
         assert_eq!(o.state, TaskState::Stuck);
         assert!(o.title.contains("buy milk"), "{o:?}");
-        assert!(o.body.contains("Sign in to Google in Mirza first"), "{o:?}");
-        assert!(o.body.contains("isn't signed in"), "{o:?}");
+        assert!(o.body.starts_with("Mirza isn't signed in to Google. Sign in"), "{o:?}");
         assert_eq!(book.waiting().len(), 1);
         assert!(book.next_due_ms().is_some());
 

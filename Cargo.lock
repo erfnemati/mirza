@@ -2657,6 +2657,7 @@ dependencies = [
 name = "mirza-mobile"
 version = "0.1.5"
 dependencies = [
+ "jiff",
  "mirza-core",
  "serde",
  "serde_json",

@@ -266,7 +266,7 @@ fun BubbleScreen() {
         SwitchRow("Show the bubble", "Over every app. Drag it anywhere; the place is kept.", b.show) { Core.set("bubble.show", it) }
         SwitchRow(
             "On the lock screen",
-            "Mirza never types there; a tap only says to unlock first.",
+            "Mirza never types there: what you say becomes a task that waits until you unlock and confirm it.",
             b.lockScreen,
         ) { Core.set("bubble.lock_screen", it) }
     }

@@ -68,6 +68,8 @@ class TypingService : AccessibilityService() {
                 else -> locked()
             }
             updateBubble(Core.settings)
+            // Tasks said on the lock screen wait for the user now.
+            if (i.action == Intent.ACTION_USER_PRESENT) VoiceTasks.unlocked()
         }
     }
 

@@ -56,6 +56,7 @@ enum class Screen(val title: String) {
     HOME("Mirza"),
     SPEECH("Speech service"),
     REVISION("AI revision"),
+    TASKS("Voice tasks"),
     BUBBLE("Bubble and gestures"),
     LISTENING("Listening"),
     TYPING("Typing"),
@@ -73,6 +74,10 @@ interface Actions {
     fun open(url: String)
     fun go(screen: Screen)
     fun notificationSettings()
+    fun signIn()
+    /** The tasks said on the lock screen, one at a time, in the task panel. */
+    fun review()
+    fun edit(taskId: String)
 }
 
 @Composable
@@ -123,6 +128,7 @@ fun HomeScreen(steps: List<Step>, a: Actions) {
                 else -> ai.name
             },
         ) { a.go(Screen.REVISION) }
+        NavRow("Voice tasks", tasksSummary()) { a.go(Screen.TASKS) }
         NavRow("Bubble and gestures", gestureSummary(s.gestures)) { a.go(Screen.BUBBLE) }
         NavRow(
             "Listening",
@@ -144,6 +150,19 @@ fun HomeScreen(steps: List<Step>, a: Actions) {
         NavRow("General", "Proxy, sounds, notifications, updates") { a.go(Screen.GENERAL) }
         NavRow("About", "Version ${BuildConfig.VERSION_NAME}, log") { a.go(Screen.ABOUT) }
     }
+}
+
+/** "Signed in to Google, 2 waiting" for the home screen. */
+@Composable
+private fun tasksSummary(): String {
+    VoiceTasks.changes // read, so it updates
+    val waiting = VoiceTasks.book()?.waiting().orEmpty()
+    val held = waiting.count { it.held }
+    return listOfNotNull(
+        if (Google.signedIn) "Signed in to Google" else "Not signed in to Google",
+        (waiting.size - held).takeIf { it > 0 }?.let { "$it waiting" },
+        held.takeIf { it > 0 }?.let { "$it to confirm" },
+    ).joinToString(", ")
 }
 
 /** "Tap: dictate. Double tap: dictate and revise with AI." */

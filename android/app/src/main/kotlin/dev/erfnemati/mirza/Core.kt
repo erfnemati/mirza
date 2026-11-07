@@ -32,12 +32,13 @@ data class BubbleSettings(
 enum class Gesture(val id: String, val label: String) {
     DICTATE("dictate", "Dictate"),
     REVISE("revise", "Dictate and revise with AI"),
+    TASK("task", "Say a task"),
     OPEN_APP("open_app", "Open Mirza"),
     NONE("none", "Nothing"),
     ;
 
     /** Whether it records, so a tap can start at once and a double tap only changes what happens after. */
-    val records get() = this == DICTATE || this == REVISE
+    val records get() = this == DICTATE || this == REVISE || this == TASK
 
     companion object {
         fun of(id: String) = entries.firstOrNull { it.id == id } ?: NONE
@@ -56,6 +57,20 @@ data class RevisionSettings(
 )
 
 data class AiSettings(val model: String, val baseUrl: String, val effort: String)
+
+data class TaskSettings(
+    /** "" for the same AI as revision. */
+    val provider: String,
+    val timeoutSec: Long,
+    /** List id; "" for the account's default list. */
+    val defaultList: String,
+    val eventMinutes: Int,
+    val timedDueDate: Boolean,
+    /** Other names per list id. */
+    val listHints: Map<String, String>,
+    /** How many tasks said on the lock screen may wait. */
+    val heldLimit: Int,
+)
 
 data class Credit(val amount: Double, val since: String)
 
@@ -77,6 +92,7 @@ data class Settings(
     val revision: RevisionSettings,
     val ai: Map<String, AiSettings>,
     val credit: Map<String, Credit>,
+    val tasks: TaskSettings,
 ) {
     val activeSpeech: SpeechSettings get() = speech.getValue(activeProvider)
     val bubbleShow: Boolean get() = bubble.show
@@ -91,6 +107,8 @@ data class Settings(
             val revision = o.getJSONObject("revision")
             val ai = o.getJSONObject("ai")
             val credit = o.getJSONObject("credit")
+            val tasks = o.getJSONObject("tasks")
+            val hints = tasks.getJSONObject("list_hints")
             return Settings(
                 activeProvider = o.getString("active_provider"),
                 silenceStopSec = o.getLong("silence_stop_sec"),
@@ -138,6 +156,15 @@ data class Settings(
                     val c = credit.getJSONObject(id)
                     Credit(c.getDouble("amount"), c.getString("since"))
                 },
+                tasks = TaskSettings(
+                    provider = tasks.getString("provider"),
+                    timeoutSec = tasks.getLong("timeout_sec"),
+                    defaultList = tasks.getString("default_list"),
+                    eventMinutes = tasks.getInt("event_minutes"),
+                    timedDueDate = tasks.getBoolean("timed_due_date"),
+                    listHints = hints.keys().asSequence().associateWith { hints.getString(it) },
+                    heldLimit = tasks.getInt("held_limit"),
+                ),
             )
         }
 
@@ -236,11 +263,12 @@ object Core {
         return api.keySet(service)
     }
 
-    /** Saves a key, or removes it when empty. Returns why it failed, or null. */
+    /** Saves a key, or removes it when empty. Returns why it failed, or null. Listeners hear of it too. */
     fun setKey(service: String, key: String): String? {
         return try {
             api.setKey(service, key)
             keysVersion++
+            listeners.forEach { it(settings) }
             null
         } catch (e: MobileException) {
             e.message ?: "couldn't save the key"
