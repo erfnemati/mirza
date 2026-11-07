@@ -535,7 +535,8 @@ mod tests {
         let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
         let (tx, rx) = std::sync::mpsc::channel();
         let d = Dictation::new(config(&format!("http://127.0.0.1:{port}")), Box::new(Recorder(tx))).unwrap();
-        assert!(d.push_audio(vec![0; 1600]));
+        // The refusal can end the stream before this audio is taken, so its result doesn't matter.
+        let _ = d.push_audio(vec![0; 1600]);
         match rx.recv_timeout(Duration::from_secs(30)).unwrap() {
             Heard::Error(e) => assert!(e.contains("Check that your proxy is working"), "{e}"),
             other => panic!("expected an error, got {other:?}"),
