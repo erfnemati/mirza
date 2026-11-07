@@ -1,9 +1,9 @@
 # Android app (roadmap step 5): plan
 
-Status: plan of 2026-11-06, checked by a second reviewer and revised. Built on the trial's results
-([android-trial.md](android-trial.md)) and Erfan's decisions. Step 4 (voice tasks in the Rust
-core, [voice-tasks.md](voice-tasks.md) on its branch) is being built at the same time; this plan
-only uses its results.
+Status: plan of 2026-11-06, checked by a second reviewer and revised; updated 2026-11-07. Built
+on the trial's results ([android-trial.md](android-trial.md)) and the decisions at the end. Step 4
+(voice tasks in the Rust core, [voice-tasks.md](voice-tasks.md)) was built at the same time; this
+plan only uses its results.
 
 ## What the app does
 
@@ -24,7 +24,7 @@ jobs, a central server, Play Store, iPhone.
 
 ## How it is built
 
-- **No server** (Erfan, 2026-11-06). The app talks to Soniox, the AI provider and Google itself,
+- **No server.** The app talks to Soniox, the AI provider and Google itself,
   like the desktop app. Each user brings their own Soniox and AI keys.
 - **Kotlin on top, the Rust core underneath.** Kotlin does what only Android can do: the bubble,
   the accessibility service, the microphone, notifications, the settings screens, Google sign-in.
@@ -99,7 +99,7 @@ a tap records a task for the queue.
 Later in step 5: the accessibility shortcut button (`FLAG_REQUEST_ACCESSIBILITY_BUTTON`), and a
 long press or double press on volume down through the accessibility service's key events (screen
 on only, normal volume keeps working). No Quick Settings tile. Making Mirza the default digital
-assistant (long press on power) only if Erfan asks.
+assistant (long press on power) is left out.
 
 ## Voice tasks on Android
 
@@ -112,8 +112,7 @@ the task. The phone uses it through `TaskBook` in `crates/mobile/src/tasks.rs`: 
 `Dispatchers.IO`; `capture`, `capture_held` and `confirm` are fast. The notification's title and
 text come from the core (`TaskOutcome`); showing it and its buttons is Kotlin's job. Android adds:
 
-- **Google sign-in through Google Play services** (`AuthorizationClient`, Erfan's pick of
-  2026-11-06): one tap, no secret in the app, Google's way for Android. It asks for exactly the
+- **Google sign-in through Google Play services** (`AuthorizationClient`): one tap, no secret in the app, Google's way for Android. It asks for exactly the
   scopes the desktop uses: `https://www.googleapis.com/auth/tasks` and
   `https://www.googleapis.com/auth/calendar.events.owned`. Sign-in and every token refresh use
   the phone's own network, not Mirza's proxy, so the phone's VPN has to reach Google at that
@@ -122,10 +121,10 @@ text come from the core (`TaskOutcome`); showing it and its buttons is Kotlin's 
   core calls Kotlin's `GoogleTokens.access_token(fresh)` before every Google call, retries
   included, and Kotlin answers with `authorize()` (silent once allowed). `fresh = true` means
   Google just refused the last token, so Kotlin clears it first and asks for a new one. The
-  Google Cloud project "Mirza" is the desktop's; Erfan adds an Android OAuth client "Mirza
-  Android" for `dev.erfnemati.mirza` with the SHA-1 under "Signing key" (step 7 of
-  `docs/voice-tasks.md`). It is published "In production" without verification: up to 100 users
-  and a warning screen once ("Testing" would end the sign-in every 7 days).
+  Google Cloud project is the desktop's, with an Android OAuth client for `dev.erfnemati.mirza`
+  and the SHA-1 under "Signing key" (step 7 of `docs/voice-tasks.md`). While the project is in
+  "Testing", only its listed test users can sign in and a sign-in ends after 7 days; "In
+  production" without verification allows up to 100 users with a warning screen once.
 - **The capture flow:** gesture, microphone service, Soniox, then `capture` and `process`, then a
   notification "Added: <title> (<list>)" with Undo and Edit. Edit opens the task panel. Events
   use the calendar's default reminders; Mirza has no alarm or reminder of its own.
@@ -134,11 +133,11 @@ text come from the core (`TaskOutcome`); showing it and its buttons is Kotlin's 
   only the transcript and sends nothing to the AI or Google. After unlock, one notification says
   how many tasks are held; tapping it goes through them one by one, a screen for each with
   Confirm (`confirm(id)` then `process(id)`), Edit (`edit`, which also releases it) and Drop
-  (`undo`). There is no "Confirm all" (Erfan's decision of 2026-11-07). Times are read from the
+  (`undo`). There is no "Confirm all". Times are read from the
   moment the task was said, so "tomorrow" stays the day after it was said even if it is
-  confirmed later; each screen shows the resolved date. Recognition needs the internet, so with no connection nothing is
-  recorded. `TaskConfig.held_limit` (1 to 10) caps the queue; when it is full `capture_held`
-  refuses with a plain message (Erfan's decision of 2026-11-07).
+  confirmed later; each screen shows the resolved date. Recognition needs the internet, so with
+  no connection nothing is recorded. `TaskConfig.held_limit` (1 to 10) caps the queue; when it is
+  full `capture_held` refuses with a plain message.
 - **One retry job:** a WorkManager job with a network constraint, first run after
   `next_due_ms`, that gets a token and calls `process_due` (held tasks are skipped).
 - Sign-in, the Tasks screen and the task panel are Kotlin and can be built against a stub before
@@ -152,17 +151,21 @@ text come from the core (`TaskOutcome`); showing it and its buttons is Kotlin's 
    B, the trial's typing fixes (hint text, no cursor, password fields), audio kept while
    connecting, notifications only while recording.
 2. **The other screens and AI revision.** Bubble and gestures, AI revision ("dictate and revise"
-   through the core), Listening, Typing, History and usage.
+   through the core), Listening, Typing, History and usage. The launcher icon and the bubble's
+   logo become the desktop's (`assets/icons/io.github.erfnemati.Mirza.svg`, the teal rounded
+   square with the white microphone).
 3. **Voice tasks.** Sign-in, the task panel and the Tasks screen first (against a stub), then the
    capture flow, Undo and Edit, the lock-screen queue and the retry job once step 4 is merged.
 4. **Triggers and polish:** accessibility button, volume key, animations, and a battery check over
    a day of use on the phone.
-5. **Release:** a signed APK from the Release workflow and an install guide (Play Protect,
-   restricted settings, Xiaomi).
+5. **Release:** the Release workflow builds and signs the APK and attaches it to the GitHub
+   release next to the desktop installers (only the real app, not the trial), and an install
+   guide (Play Protect, restricted settings, Xiaomi).
 
 Each PR is tested on the KVM emulator with the virtual microphone (Persian clips through live
-Soniox), then on Erfan's phone with a short checklist; the PR says which is which. Recording from
-the lock screen comes with the queue in PR 3; until then a tap there only plays the error sound
+Soniox) and says what was tested there. What the emulator can't cover goes into one phone
+checklist (below), run once on the release candidate instead of once per PR. Recording from the
+lock screen comes with the queue in PR 3; until then a tap there only plays the error sound
 (Android hides toasts behind the lock screen).
 
 ## Building and trying it
@@ -176,22 +179,47 @@ around; they also carry `DebugReceiver`, adb hooks that only the shell can use:
     ... -a mirza.SET --es path proxy --es json '"http://10.0.2.2:10808"'           # change a setting
     ... -a mirza.UPDATE                                                             # check for updates
 
-On the emulator the proxy is `http://10.0.2.2:10808` (the server's proxy as the emulator sees it).
+On the emulator, a proxy on the host at `127.0.0.1:10808` is `http://10.0.2.2:10808`.
 A key can go in without showing up in any command line, fed through stdin:
 `adb exec-in "run-as dev.erfnemati.mirza sh -c 'mkdir -p files/mirza && cat > files/mirza/keys.toml'" < keys.toml`,
 then `adb shell "run-as dev.erfnemati.mirza chmod 700 files/mirza"` and `chmod 600` on the file
 the same way (`exec-in` ends the shell when the input ends, so nothing after `cat` runs there).
 Remove the key after the test.
 
+## Phone checklist
+
+Run once on the release candidate APK, on a real phone, installed the way a user would (from the
+browser or the file manager, not adb). Each PR adds what the emulator couldn't cover.
+
+From PR 1 (skeleton and dictation):
+
+- [ ] Install; Play Protect may block it (see the install guide). Mirza installs next to the
+      trial as a separate app.
+- [ ] Open Mirza. Allow the microphone and notifications from the setup list.
+- [ ] Typing: open Accessibility from the list and turn Mirza on. If Android says the setting is
+      restricted: App info, the menu at the top, Allow restricted settings, then again. Back in
+      Mirza the status says Ready and the bubble shows.
+- [ ] If the trial is installed: turn off its typing (the list asks for it while it is on).
+- [ ] Enter the Soniox key on the Speech screen; set the proxy on the General screen if needed.
+- [ ] Xiaomi: the Autostart and Battery saver buttons open the right pages; set them and tick the
+      steps.
+- [ ] Dictate Persian and English mixed in Telegram, WhatsApp, a browser field and one more app.
+      The text lands at the cursor, half-spaces are right, nothing is lost at the start.
+- [ ] While recording, "Mirza is listening" with a Stop button; Stop ends it and the
+      notification goes away. No Mirza notification when idle.
+- [ ] Long press on the bubble opens Mirza; drag moves it and the place stays.
+- [ ] Mirza leaves recent apps once you leave it, and typing stays on. Restart the phone: the
+      bubble comes back by itself.
+- [ ] How it feels: start delay, sounds.
+
 ## Signing key
 
-Made on the development server on 2026-11-06 (Erfan's OK): RSA 4096, PKCS12, alias `mirza`, owner
-`CN=Mirza, O=Erfan Nemati`, valid until 2054. It lives in `.secrets/` at the root of the main
-clone (`~/projects/mirza/.secrets/android-release.p12` and `android-release.password`, mode 600),
-ignored by git and listed in `.backup-paths`, so Erfan's laptop keeps a copy. The Release workflow
-gets it from the GitHub secrets `MIRZA_ANDROID_KEYSTORE` (the file in base64) and
-`MIRZA_ANDROID_KEYSTORE_PASSWORD`; GitHub can't show them again, so the laptop copy is the backup.
-If the key is lost, every user has to uninstall Mirza and install it again.
+Made on 2026-11-06: RSA 4096, PKCS12, alias `mirza`, valid until 2054. It lives in `.secrets/` at
+the root of the main clone (`android-release.p12` and `android-release.password`, mode 600),
+ignored by git and listed in `.backup-paths`, so the backup copies it. The Release workflow gets
+it from the GitHub secrets `MIRZA_ANDROID_KEYSTORE` (the file in base64) and
+`MIRZA_ANDROID_KEYSTORE_PASSWORD`; GitHub can't show them again, so the backup is the only other
+copy. If the key is lost, every user has to uninstall Mirza and install it again.
 
 Certificate fingerprints (public; Google Cloud asks for the SHA-1 when the Android OAuth client is
 created for `dev.erfnemati.mirza`):
@@ -201,9 +229,10 @@ created for `dev.erfnemati.mirza`):
 
 ## Decisions
 
-Answered by Erfan on 2026-11-06: no central server, the signing key as above, Google sign-in
-through Play services. On 2026-11-07: a full lock-screen queue refuses new tasks with a plain
-message, and after unlocking the held tasks are confirmed one by one, with no "Confirm all".
+- No central server; the signing key as above; Google sign-in through Play services (2026-11-06).
+- A full lock-screen queue refuses new tasks with a plain message; after unlocking, the held tasks
+  are confirmed one by one, with no "Confirm all" (2026-11-07).
+- Only the real app ships in releases; the trial stays a development tool (2026-11-07).
 
 ## Risks
 
@@ -214,4 +243,4 @@ message, and after unlocking the held tasks are confirmed one by one, with no "C
   to cover it, and it may get stricter.
 - Google may tighten unverified apps or the Tasks and Calendar scopes; then the project needs
   verification.
-- Compose adds about 1 to 2 MB to the APK after R8, and a longer first build on the server.
+- Compose adds about 1 to 2 MB to the APK after R8, and a longer first build.

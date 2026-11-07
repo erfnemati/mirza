@@ -55,7 +55,7 @@ tests come from the Release workflow run by hand (workflow artifacts).
   them ready once, after merging the latest `develop`. Pushing a branch runs no CI; only Rust
   changes do.
 - Release: bump `version` in the root `Cargo.toml`, merge `develop` into `main`, tag `vX.Y.Z`; the
-  Release workflow builds the installers. Only when Erfan asks.
+  Release workflow builds the installers. Only when the owner asks.
 - No AI attribution in commits or PRs (no Co-Authored-By trailer). Older commits have one; don't
   copy it.
 - Every network call goes through the proxy setting (`net::connect_ws`, `usage::http_client`).

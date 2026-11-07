@@ -57,7 +57,7 @@ Experiment switches:
 Since build trial3 the screen shows a button when typing isn't running ("Typing is off" or "on
 but not running"), which opens the accessibility settings, and each start of
 the app logs how its last process ended and whether typing is on in the settings. The screen stays
-out of the recent apps once you leave it (see "First results on Erfan's phone").
+out of the recent apps once you leave it (see "First results on a phone").
 
 Every tap writes one line with the modes, the Android version and the app in front, then whether
 each service start was accepted or refused (with the exception), and after two seconds whether the
@@ -70,10 +70,10 @@ adb test hooks (`DebugReceiver`, protected by the `DUMP` permission, which only 
 
 ## Results
 
-Everything below was tested on the Android 16 emulator on the development server (API 36,
-`google_apis` x86_64 image, software CPU), with the virtual microphone playing a recorded clip and
-taps sent with `input tap` on the bubble. Nothing has run on a real phone yet; the checklist at the
-end is for that. Erfan's phone is a Xiaomi with HyperOS 1.0 on Android 13, and its rules differ
+Everything below was tested on the Android 16 emulator (API 36, `google_apis` x86_64 image,
+software CPU), with the virtual microphone playing a recorded clip and taps sent with `input tap`
+on the bubble, unless it says "on a phone"; the checklist at the end is for the phone. The test
+phone is a Xiaomi with HyperOS 1.0 on Android 13, and its rules differ
 from Android 16's: holding "draw over other apps" is enough there to start a foreground service
 from the background (the visible-window condition came with Android 15), foreground service types
 are only enforced from Android 14, and Xiaomi adds its own background limits. The phone test can
@@ -125,8 +125,8 @@ What this shows:
   is not silenced. That explains two odd silent runs in the first batch (A with the keyboard up,
   and one D run with accessibility on); the keyboard-up A case, run again with the check, was
   silent with "Android says it did not silence this app". The cause was the software CPU
-  emulation: once the server had KVM, the same emulator heard a 12-second test tone without a
-  gap, twice (see "The emulator on this server").
+  emulation: with KVM, the same emulator heard a 12-second test tone without a gap, twice (see
+  "The emulator").
 - The accessibility overlay (bubble 2) needs no "draw over other apps" permission and no permanent
   notification, and taps on it work like taps on the normal overlay.
 
@@ -152,14 +152,14 @@ behave differently from a plain `EditText`.
 - From the emulator without a proxy, the connection timed out and the app showed the core's plain
   message ("couldn't connect to Soniox: timed out. If Soniox is blocked where you are, set a proxy
   ..."). The message points to the desktop settings window; the phone app needs its own wording.
-- From the emulator through the server's proxy (`http://10.0.2.2:10808`), the session connected and
+- From the emulator through a proxy on the host (`http://10.0.2.2:10808`), the session connected and
   ended cleanly, but no text came back (0 to 3 partial updates, nothing final). The reason is the
   emulator's microphone, not the app: with the debug switch that saves what the app recorded
   (`save_audio` in the prefs, set with adb), the file held about one second of sound and then only
   zeros, while the virtual microphone on the host carried the whole clip. Fed that saved file, the
   desktop got no text either, while the same clip with two thirds of it cut out (20 ms kept out of
   every 60 ms) still gave 53 partial updates and final text.
-- After the server got KVM, live recognition worked on the emulator. The same clip (Persian then
+- With KVM, live recognition worked on the emulator. The same clip (Persian then
   English, made with espeak-ng) was played into the emulator's microphone, and dictation was started
   and stopped by tapping the accessibility bubble (mode B, keyboard up, Contacts "Company" field in
   front). The field ended up with the whole sentence, 110 characters with both half-spaces and the
@@ -191,7 +191,7 @@ Android 13 shows an older dialog ("Restricted setting"), and HyperOS may add its
 checklist asks for the exact wording. An app installed from Google Play is not restricted. adb
 installs are not restricted either, so tests that use `adb install` never show this.
 
-### First results on Erfan's phone
+### First results on a phone
 
 Xiaomi with HyperOS 1.0 on Android 13, 2026-11-06. This is a first run, not yet the whole checklist.
 
@@ -217,7 +217,7 @@ Xiaomi with HyperOS 1.0 on Android 13, 2026-11-06. This is a first run, not yet 
   showed neither while idle, only the microphone notification while recording.
 - Trial2 fixed "Message" in Telegram and WhatsApp.
 - Swiping Mirza trial away in the recent apps turned typing off: the service was off in
-  Accessibility, and he had to turn it on again (and off and on once more) before the bubble came
+  Accessibility, and it had to be turned on again (and off and on once more) before the bubble came
   back. On the emulator, a force stop (`am force-stop`) does exactly that: Android removes a
   force-stopped app's accessibility service from the enabled list, by design. A plain kill of the
   process doesn't: Android restarted the service and the bubble came back by itself within 5
@@ -257,19 +257,20 @@ Xiaomi with HyperOS 1.0 on Android 13, 2026-11-06. This is a first run, not yet 
   Accessibility list: opening one service's own page there needs a system permission
   (`OPEN_ACCESSIBILITY_DETAILS_SETTINGS`). A keyboard (IME) may not have this
   problem; untested.
-- On the lock screen the bubble stays, but Mirza never types or acts there (Erfan, 2026-11-06). A
-  spoken command (for now only "add a task") goes into a queue on the phone, at most 10, and the
-  limit can be set lower but never higher. After unlocking, Mirza shows the queue and runs only the
-  commands he confirms. Recognition needs the internet, so with no connection nothing is queued.
+- On the lock screen the bubble stays, but Mirza never types or acts there. A spoken command (for
+  now only "add a task") goes into a queue on the phone, at most 10, and the limit can be set
+  lower but never higher. After unlocking, Mirza goes through the queue one by one and runs only
+  the commands the user confirms. Recognition needs the internet, so with no connection nothing is
+  queued.
 
-## The emulator on this server
+## The emulator
 
-Since 2026-11-06 the server's VM has nested virtualization on (in vSphere, "Expose hardware
-assisted virtualization to the guest OS" under the VM's CPU settings), so the emulator runs with
-KVM. A cold boot takes about 2 minutes, and its microphone hears the virtual microphone without
-gaps: a 12-second tone came through as 240 of 240 chunks with sound, in two runs.
-`scripts/dev/emulator.sh` uses KVM whenever `/dev/kvm` is there; the user `claude` is in the `kvm`
-group, and a shell that started before that runs the emulator through `sg kvm`.
+On a development machine that is itself a VM, nested virtualization has to be on (in vSphere,
+"Expose hardware assisted virtualization to the guest OS" under the VM's CPU settings) for the
+emulator to run with KVM. Then a cold boot takes about 2 minutes, and its microphone hears the
+virtual microphone without gaps: a 12-second tone came through as 240 of 240 chunks with sound, in
+two runs. `scripts/dev/emulator.sh` uses KVM whenever `/dev/kvm` is there; the user needs to be in
+the `kvm` group, and a shell that started before that runs the emulator through `sg kvm`.
 
 The trial ran before that, on software CPU emulation, which runs every virtual CPU on one host
 thread; more cores only add load, and the multi-threaded mode never finished booting. What made it
