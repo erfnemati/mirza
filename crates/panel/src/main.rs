@@ -6,12 +6,15 @@
 
 use std::collections::BTreeMap;
 
-use mirza_core::config::{self, Config, PROVIDERS, Shortcut};
+use mirza_core::ai::{self, revise};
+use mirza_core::config::{self, Config, Shortcut};
 use mirza_core::ipc::{self, Reply, Request, Snapshot};
 use mirza_core::models;
 use mirza_core::{net, secrets};
 use serde::Serialize;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
+
+mod tasks;
 
 #[derive(Serialize)]
 struct KeyInfo {
@@ -81,6 +84,59 @@ async fn list_models(provider: String) -> Models {
     }
 }
 
+/// An AI provider set up as in the config file.
+fn ai_client(cfg: &Config, kind: ai::Kind, timeout: std::time::Duration) -> Result<ai::Client, String> {
+    let proxy = net::resolve_proxy(&cfg.proxy).map_err(|e| e.to_string())?;
+    let key = secrets::get(kind.id()).map(|(k, _)| k);
+    ai::Client::new(kind, cfg.ai.get(kind), key, proxy.as_ref(), timeout).map_err(|e| e.to_string())
+}
+
+/// The models an AI provider offers; empty with the reason if it can't be asked.
+#[tauri::command]
+async fn list_ai_models(provider: String) -> AiModels {
+    let fail = |error: String| AiModels { models: Vec::new(), error };
+    let Some(kind) = ai::Kind::parse(&provider) else { return fail(format!("unknown AI provider {provider:?}")) };
+    if kind.needs_key() && secrets::get(kind.id()).is_none() {
+        return fail(String::new());
+    }
+    let cfg = Config::load(&config::config_path()).unwrap_or_default();
+    let client = match ai_client(&cfg, kind, std::time::Duration::from_secs(15)) {
+        Ok(c) => c,
+        Err(e) => return fail(e),
+    };
+    match client.models().await {
+        Ok(models) => AiModels { models, error: String::new() },
+        Err(e) => fail(e.to_string()),
+    }
+}
+
+#[derive(Serialize)]
+struct AiModels {
+    models: Vec<String>,
+    error: String,
+}
+
+#[derive(Serialize)]
+struct Tried {
+    text: String,
+    ms: u64,
+}
+
+/// Revises `text` with the chosen AI provider, as dictation would.
+#[tauri::command]
+async fn try_revision(text: String) -> Result<Tried, String> {
+    let cfg = Config::load(&config::config_path()).map_err(|e| e.to_string())?;
+    let kind = cfg.revision.kind().ok_or("Choose an AI provider first.")?;
+    let timeout = revise::timeout_for(&text, cfg.revision.timeout_sec);
+    let client = ai_client(&cfg, kind, timeout)?;
+    let stt = cfg.providers.get(&cfg.active_provider).cloned().unwrap_or_else(|| cfg.providers.soniox.clone());
+    let hints = revise::Hints::new(&cfg.revision, stt.languages, stt.terms);
+    let started = std::time::Instant::now();
+    let text = revise::revise(&client, &text, &hints).await.map_err(|e| e.to_string())?;
+    let text = if cfg.typing.persian_letters { mirza_core::normalize::persian_letters(&text) } else { text };
+    Ok(Tried { text, ms: started.elapsed().as_millis() as u64 })
+}
+
 #[tauri::command]
 fn languages() -> Vec<models::Language> {
     models::default_languages()
@@ -97,7 +153,7 @@ fn load() -> PanelState {
         config,
         config_path: path.to_string_lossy().into_owned(),
         config_error,
-        keys: PROVIDERS.iter().map(|p| (p.to_string(), key_info(p))).collect(),
+        keys: secrets::services().iter().map(|p| (p.to_string(), key_info(p))).collect(),
         platform: std::env::consts::OS,
         desktop: std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(),
         wayland: std::env::var_os("WAYLAND_DISPLAY").is_some(),
@@ -149,8 +205,8 @@ async fn set_shortcuts(list: Vec<Shortcut>) -> Result<(), String> {
 
 #[tauri::command]
 fn set_key(provider: String, key: String) -> Result<KeyInfo, String> {
-    if !PROVIDERS.contains(&provider.as_str()) {
-        return Err(format!("unknown provider {provider:?}"));
+    if !secrets::services().contains(&provider.as_str()) {
+        return Err(format!("unknown service {provider:?}"));
     }
     secrets::set(&provider, &key).map_err(|e| e.to_string())?;
     Ok(key_info(&provider))
@@ -160,9 +216,9 @@ fn open(target: &str) -> Result<(), String> {
     let mut cmd = if cfg!(target_os = "macos") {
         std::process::Command::new("open")
     } else if cfg!(windows) {
-        let mut c = std::process::Command::new("cmd");
-        c.args(["/C", "start", ""]);
-        c
+        // Not `cmd /C start`: cmd cuts an address at its first `&`, and
+        // the Google sign-in address has several.
+        std::process::Command::new("explorer")
     } else {
         std::process::Command::new("xdg-open")
     };
@@ -265,11 +321,17 @@ fn main() {
             unsafe { std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1") };
         }
     }
+    let args: Vec<String> = std::env::args().collect();
+    *tasks::EDIT_ON_START.lock().unwrap_or_else(|e| e.into_inner()) = tasks::edit_arg(&args);
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, _| {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.unminimize();
                 let _ = w.set_focus();
+            }
+            // Edit, from a task's notification while the window is open.
+            if let Some(id) = tasks::edit_arg(&args) {
+                let _ = app.emit("edit-task", id);
             }
         }))
         .invoke_handler(tauri::generate_handler![
@@ -286,9 +348,21 @@ fn main() {
             start_daemon,
             list_mics,
             list_models,
+            list_ai_models,
+            try_revision,
             languages,
             log,
-            debug_enabled
+            debug_enabled,
+            tasks::tasks_state,
+            tasks::task_lists,
+            tasks::try_task,
+            tasks::edit_task_on_start,
+            tasks::google_client,
+            tasks::google_client_remove,
+            tasks::google_sign_in,
+            tasks::google_sign_in_paste,
+            tasks::google_sign_in_cancel,
+            tasks::google_sign_out
         ])
         .run(tauri::generate_context!())
         .expect("running the settings window");

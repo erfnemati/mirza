@@ -1,12 +1,15 @@
 name: CI
 
-# Changes to docs alone don't need a build.
+# Keep CI minutes low: only Rust changes build, draft PRs are skipped (mark the PR
+# ready to run it), and develop isn't built again after a merge because its PR
+# already was. Merge the latest develop into a branch before marking it ready.
 on:
   push:
     branches: [main]
-    paths-ignore: ["**.md", "docs/**", "LICENSE"]
+    paths: ["crates/**", "Cargo.toml", "Cargo.lock", "rustfmt.toml", ".github/workflows/ci.yml", "!**.md"]
   pull_request:
-    paths-ignore: ["**.md", "docs/**", "LICENSE"]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths: ["crates/**", "Cargo.toml", "Cargo.lock", "rustfmt.toml", ".github/workflows/ci.yml", "!**.md"]
   workflow_dispatch:
 
 concurrency:
@@ -19,7 +22,9 @@ env:
 jobs:
   format:
     name: Formatting
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -29,6 +34,7 @@ jobs:
 
   test:
     name: ${{ matrix.name }}
+    if: github.event.pull_request.draft != true
     strategy:
       fail-fast: false
       matrix:
@@ -37,6 +43,7 @@ jobs:
           - { name: Windows, os: windows-latest }
           - { name: macOS, os: macos-latest }
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -47,7 +54,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libxdo-dev libayatana-appindicator3-dev
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libxdo-dev libayatana-appindicator3-dev
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Tests

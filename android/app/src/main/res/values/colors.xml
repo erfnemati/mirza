@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The logo's teal (assets/icons/io.github.erfnemati.Mirza.svg). -->
+    <color name="logo_light">#2DD4BF</color>
+    <color name="logo_dark">#0F766E</color>
+</resources>

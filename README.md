@@ -4,7 +4,7 @@
 
 <p align="center">
 Press a shortcut, speak, and your words are typed wherever your cursor is.<br>
-Open-source speech-to-text dictation for <b>Linux, Windows and macOS</b>.
+Open-source speech-to-text dictation for <b>Linux, Windows, macOS and Android</b>.
 </p>
 
 <p align="center">
@@ -35,7 +35,8 @@ this month.
 - **You write in more than one language.** Mix Persian (Farsi) and English in
   the same sentence; Mirza types both correctly, half-spaces included.
 - **You want dictation that works everywhere.** Not just in one app or browser:
-  Wayland and X11 on Linux (KDE Plasma, GNOME), Windows, macOS.
+  Wayland and X11 on Linux (KDE Plasma, GNOME), Windows, macOS, and Android
+  phones.
 
 It is an open-source alternative to tools like Wispr Flow, Superwhisper, and
 the built-in voice typing of Windows and macOS.
@@ -48,6 +49,18 @@ the built-in voice typing of Windows and macOS.
 - **Services:** Soniox, OpenAI (GPT transcribe, Whisper) or ElevenLabs Scribe.
   Switch between them from the tray.
 - **Recognition help:** language hints, and custom words for names and jargon.
+- **AI revision (optional):** a separate shortcut sends the text through an AI
+  model (Claude, OpenAI, Gemini, OpenRouter or your own local server) that
+  drops fillers and repeats, keeps your last correction, and fixes punctuation
+  and half-spaces, without translating. It can also polish the wording, lightly
+  or fully, with switches for plain words, formal Persian and digits. If the AI
+  fails, what you said is typed as is. See [docs/ai-revision.md](docs/ai-revision.md).
+- **Voice tasks (optional):** a shortcut of its own (a gesture on the phone).
+  Say a task and Mirza saves it to Google Tasks with a short title, in the
+  list that fits what you said. A task with a clock time also becomes a Google
+  Calendar event, so Google reminds you. A notification has **Undo** and
+  **Edit**, and a task said offline waits and is saved once Google can be
+  reached. See [docs/voice-tasks.md](docs/voice-tasks.md).
 - **Tray and settings:** a tray icon that shows when it's recording, and a
   settings window with your usage and spend.
 - **Pauses** if you switch windows mid-sentence, so text never lands in the
@@ -57,6 +70,19 @@ the built-in voice typing of Windows and macOS.
 - **Tells you about new versions** (one check a day; can be turned off).
 - **Proxy support** (HTTP and SOCKS5). On Windows and macOS it uses the
   system proxy that VPN apps set, unless you enter another one.
+
+**On Android**, Mirza is a small bubble over every app; you choose its size,
+its opacity and whether it shows the logo. Tap it and speak, and the text goes
+into the field you are in, in any app. A double tap, a long press, volume down
+or Android's accessibility button can start dictation, dictation revised by AI,
+or a voice task. On the lock screen Mirza types nothing: a task you say there
+waits on the phone until you unlock it and confirm the task.
+
+<p align="center">
+<img src="docs/android-home.png" width="230" alt="Mirza's home screen on Android: Mirza is ready, the bubble sits at the edge, and the settings follow">
+<img src="docs/android-dictation.png" width="230" alt="Dictation in a messaging app: the bubble has typed a Persian sentence with English words in it">
+<img src="docs/android-task.png" width="230" alt="A voice task: a long press on the bubble opens the task panel, which shows what Mirza hears">
+</p>
 
 ## Install
 
@@ -94,6 +120,14 @@ Mirza to Applications. The first time you open it:
 2. Allow **Microphone** when asked.
 3. Allow **Accessibility**, so Mirza can see its shortcut and type.
 
+### Android
+
+Download `Mirza-<version>-android.apk` on the phone (Android 10 or newer) and
+open it. Mirza isn't in the Play Store, so Play Protect may warn you, and
+Android may call its accessibility switch a "restricted setting" until you
+allow it. The [Android install guide](docs/install-android.md) walks through
+both, and through the extra steps on Xiaomi phones.
+
 ## Getting started
 
 1. Click the Mirza icon in the tray to open the settings.
@@ -104,14 +138,30 @@ Mirza to Applications. The first time you open it:
 3. Press **Ctrl+Alt+H** in any app and start talking; press it again to stop.
    Or hold **Ctrl+Alt+J** while you talk. You can change both under
    **Shortcuts**.
+4. Optional: turn on **AI revision** with a key for an AI provider
+   ([guide](docs/ai-revision.md)), and set up **Voice tasks** once with your
+   Google account ([guide](docs/voice-tasks.md)).
 
 ## Privacy
 
-- **When it listens:** audio is recorded only while you dictate.
+- **When it listens:** audio is recorded only while you dictate or say a task.
 - **Where audio goes:** only to the speech service you picked.
-- **Your API keys** stay on your computer, readable only by you.
-- **Your text** is kept in memory for the "Recent text" list and never saved
-  to disk.
+- **AI revision**, if you turn it on, sends the text (not the audio) to the AI
+  provider you picked, or to your own server.
+- **Voice tasks**, if you set them up, send the text to the AI provider you
+  chose for tasks, with the names of your task lists and the current date and
+  time, and then the task to your Google account (Google Tasks, and Google
+  Calendar for a task with a time).
+- **Your API keys** and the Google sign-in stay on your computer, readable only
+  by you. On the phone they are in the app's private storage; the Google
+  sign-in itself is kept by Google Play services.
+- **Your text:** on the computer, dictated text is kept in memory for the
+  "Recent text" list and never saved to disk. Voice tasks are different: each
+  task is saved in Mirza's data folder until Google has it, and the last 20
+  saved tasks stay there for Undo and Edit. On the phone, "Recent text", tasks
+  that wait and the lock-screen queue are kept in the app's private storage,
+  left out of backups; "Recent text" can be turned off. A task said on the lock
+  screen is sent nowhere until you unlock the phone and confirm it.
 
 ## Build from source
 
@@ -123,6 +173,8 @@ sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev   # Debian/Ubun
 cargo build --release -p mirza -p mirza-panel
 scripts/install-linux.sh    # optional: install for your user
 ```
+
+The Android app is in `android/`; see [docs/android-app.md](docs/android-app.md).
 
 Contributions are welcome. See [docs/testing.md](docs/testing.md) for a manual
 test checklist.

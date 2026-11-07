@@ -154,6 +154,42 @@ impl Desktop {
         self.notify(summary, body, false, 0).await;
     }
 
+    /// A voice task's notification. Windows shows Undo and Edit buttons
+    /// while the toast is on screen; macOS (notifications from a script
+    /// can't have buttons) points to the menu instead.
+    pub async fn notify_task(&self, summary: &str, body: &str, task: &str, _replaces: u32) -> u32 {
+        #[cfg(windows)]
+        {
+            let (summary, body, task, tx) = (summary.to_owned(), body.to_owned(), task.to_owned(), self.tx.clone());
+            // This thread waits for a click until the toast goes away.
+            std::thread::spawn(move || {
+                let shown = notify_rust::Notification::new()
+                    .app_id(crate::daemon::APP_ID)
+                    .summary(&summary)
+                    .body(&body)
+                    .action("undo", "Undo")
+                    .action("edit", "Edit")
+                    .timeout(notify_rust::Timeout::Milliseconds(25_000))
+                    .show();
+                match shown {
+                    Ok(handle) => handle.wait_for_action(|action| {
+                        if action == "undo" || action == "edit" {
+                            let _ = tx.send(Msg::TaskAction(task, action.to_owned()));
+                        }
+                    }),
+                    Err(e) => tracing::warn!("notification failed: {e}"),
+                }
+            });
+            0
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = task;
+            let body = format!("{body}\nUndo or edit it from the Mirza menu.");
+            self.notify(summary, &body, false, 0).await
+        }
+    }
+
     pub async fn close_notification(&self, _id: u32) {}
 
     pub async fn show(&self, view: TrayView) {
@@ -295,6 +331,8 @@ struct TrayUi {
     cancel: MenuItem,
     providers: Vec<(&'static str, CheckMenuItem)>,
     copy_last: MenuItem,
+    undo_task: MenuItem,
+    edit_task: MenuItem,
     settings: MenuItem,
     config: MenuItem,
     quit: MenuItem,
@@ -310,6 +348,8 @@ impl TrayUi {
         let providers: Vec<(&'static str, CheckMenuItem)> =
             PROVIDERS.iter().map(|p| (*p, CheckMenuItem::new(provider_name(p), true, false, None))).collect();
         let copy_last = MenuItem::new("Copy last transcript", false, None);
+        let undo_task = MenuItem::new("Undo last task", false, None);
+        let edit_task = MenuItem::new("Edit last task", false, None);
         let settings = MenuItem::new("Settings…", true, None);
         let config = MenuItem::new("Edit config file", true, None);
         let quit = MenuItem::new("Quit Mirza", true, None);
@@ -320,7 +360,8 @@ impl TrayUi {
         for (_, item) in &providers {
             menu.append(item).map_err(err)?;
         }
-        menu.append_items(&[&sep(), &copy_last, &settings, &config, &sep(), &quit]).map_err(err)?;
+        menu.append_items(&[&sep(), &copy_last, &undo_task, &edit_task, &settings, &config, &sep(), &quit])
+            .map_err(err)?;
         let builder = TrayIconBuilder::new()
             .with_menu(Box::new(menu.clone()))
             .with_tooltip("Mirza")
@@ -344,6 +385,8 @@ impl TrayUi {
             cancel,
             providers,
             copy_last,
+            undo_task,
+            edit_task,
             settings,
             config,
             quit,
@@ -385,6 +428,11 @@ impl TrayUi {
             item.set_checked(*id == v.provider);
         }
         self.copy_last.set_enabled(v.has_last);
+        let has_task = !v.last_task.is_empty();
+        self.undo_task.set_enabled(has_task);
+        self.edit_task.set_enabled(has_task);
+        self.undo_task.set_text(if has_task { v.task_label("Undo") } else { "Undo last task".into() });
+        self.edit_task.set_text(if has_task { v.task_label("Edit") } else { "Edit last task".into() });
         let _ = self.tray.set_tooltip(Some(format!("Mirza — {}", v.status_line())));
     }
 
@@ -395,6 +443,10 @@ impl TrayUi {
             Some(Action::Cancel)
         } else if id == self.copy_last.id() {
             Some(Action::CopyLast)
+        } else if id == self.undo_task.id() {
+            Some(Action::UndoTask)
+        } else if id == self.edit_task.id() {
+            Some(Action::EditTask)
         } else if id == self.settings.id() {
             Some(Action::OpenSettings)
         } else if id == self.config.id() {

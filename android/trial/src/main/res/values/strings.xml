@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Mirza trial</string>
+    <string name="typing_service_label">Mirza trial typing</string>
+    <string name="typing_service_description">Types what you dictate into the text field you are in. Mirza reads the focused text field only to insert text at the cursor.</string>
+</resources>

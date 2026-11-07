@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Only for the moment before Compose draws; the screens use MirzaTheme. -->
+    <style name="Theme.Mirza" parent="@android:style/Theme.DeviceDefault.DayNight">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+
+    <!-- The task panel: a card over the app that was in front, which stays visible behind it. -->
+    <style name="Theme.Mirza.Panel" parent="Theme.Mirza">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <!-- The card itself slides up (TaskPanel.kt); the window only fades. -->
+        <item name="android:windowAnimationStyle">@android:style/Animation.Dialog</item>
+    </style>
+</resources>

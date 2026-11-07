@@ -1,0 +1,36 @@
+[package]
+name = "mirza-mobile"
+description = "Mirza's core for the phone apps, exposed to Kotlin (and later Swift) through UniFFI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "mirza_mobile"
+crate-type = ["cdylib", "lib"]
+
+# Writes the Kotlin bindings; built only with `--features bindgen`, so the
+# desktop CI never compiles the bindgen tool.
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+bindgen = ["uniffi/cli"]
+
+[dependencies]
+mirza-core = { path = "../core" }
+jiff = "0.2.37"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.21"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "sync", "time"] }
+toml = "1.1.6"
+toml_edit = "0.25.15"
+uniffi = "0.32.2"
+
+[dev-dependencies]
+tokio = { version = "1.53.1", features = ["macros"] }

@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Request {
     Toggle,
+    /// Like Toggle, but the text is revised with AI before it is typed.
+    ToggleRevise,
     Start,
     Stop,
     Cancel,
@@ -37,6 +39,30 @@ pub enum Request {
     TestSound,
     /// Forgets the recent transcripts.
     ClearHistory,
+    /// Starts saying a task, or stops if already listening.
+    ToggleTask,
+    /// Saves a task from text, as if it was said. `data` has its id.
+    AddTask {
+        text: String,
+    },
+    /// The waiting and the recently saved tasks, in `data`.
+    Tasks,
+    /// The account's Google Tasks lists, in `data`.
+    TaskLists {
+        #[serde(default)]
+        refresh: bool,
+    },
+    /// Takes a task back.
+    UndoTask {
+        id: String,
+    },
+    /// Changes a task; `data` has the outcome.
+    EditTask {
+        id: String,
+        edit: crate::tasks::Edit,
+    },
+    /// Reads the Google sign-in again and tries every waiting task now.
+    RetryTasks,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -48,14 +74,20 @@ pub struct Reply {
     pub status: Option<Status>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snapshot: Option<Snapshot>,
+    /// What a request asked for, when it isn't status or snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
 }
 
 impl Reply {
     pub fn ok() -> Self {
-        Self { ok: true, message: String::new(), status: None, snapshot: None }
+        Self { ok: true, message: String::new(), status: None, snapshot: None, data: None }
     }
     pub fn err(message: impl Into<String>) -> Self {
-        Self { ok: false, message: message.into(), status: None, snapshot: None }
+        Self { ok: false, message: message.into(), status: None, snapshot: None, data: None }
+    }
+    pub fn data(v: serde_json::Value) -> Self {
+        Self { data: Some(v), ..Self::ok() }
     }
 }
 
@@ -67,6 +99,8 @@ pub enum State {
     Connecting,
     Listening,
     Finishing,
+    /// Waiting for the AI to revise the text.
+    Revising,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -84,6 +118,10 @@ pub struct Snapshot {
     pub status: Status,
     /// Recent transcripts, newest last.
     pub history: Vec<String>,
+    /// For each entry of `history`: what the speech provider heard, when AI
+    /// revised it; "" otherwise.
+    #[serde(default)]
+    pub history_raw: Vec<String>,
     pub usage: Option<UsageInfo>,
     /// Whether usage is being fetched right now.
     #[serde(default)]
@@ -191,5 +229,22 @@ mod tests {
         let r: Request = serde_json::from_str(r#"{"cmd":"set_provider","id":"openai"}"#).unwrap();
         assert_eq!(r, Request::SetProvider { id: "openai".into() });
         assert_eq!(serde_json::to_string(&Reply::ok()).unwrap(), r#"{"ok":true}"#);
+    }
+
+    #[test]
+    fn task_edits_from_the_settings_window() {
+        let sent = r#"{"cmd":"edit_task","id":"t1","edit":{"title":"Call Sara","note":"","list":"L2",
+            "date":"2026-11-09","time":"09:30:00","minutes":0}}"#;
+        let Request::EditTask { id, edit } = serde_json::from_str(sent).unwrap() else { panic!("not an edit") };
+        assert_eq!(id, "t1");
+        assert_eq!(
+            (edit.date, edit.time),
+            (Some(jiff::civil::date(2026, 11, 9)), Some(jiff::civil::time(9, 30, 0, 0)))
+        );
+        let none = r#"{"cmd":"edit_task","id":"t1","edit":{"title":"x","date":null,"time":null}}"#;
+        let Request::EditTask { edit, .. } = serde_json::from_str(none).unwrap() else { panic!("not an edit") };
+        assert_eq!((edit.date, edit.time, edit.list.as_str()), (None, None, ""));
+        let r: Request = serde_json::from_str(r#"{"cmd":"task_lists"}"#).unwrap();
+        assert_eq!(r, Request::TaskLists { refresh: false });
     }
 }
