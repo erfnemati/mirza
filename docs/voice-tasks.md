@@ -13,11 +13,13 @@ title, the list, the date and time, and anything it had to guess, with **Undo** 
 ## Setting up Google
 
 Mirza signs in to your Google account to add tasks and events. Google requires every app that
-does this to have its own "OAuth client" in a Google Cloud project. Until Mirza ships with one,
-you create it once, for free, in your own Google account. It takes about ten minutes. You need
-no credit card.
+does this to have its own "OAuth client" in a Google Cloud project. Mirza doesn't come with one:
+a shared client would show its owner's email address on everyone's sign-in screen. So you create
+your own once, for free, in your Google account. It takes about ten minutes. You need no credit
+card.
 
-If someone already gave you a client ID for Mirza, skip to [Signing in](#signing-in).
+If someone already gave you the client file for Mirza, skip to [Signing in](#signing-in). Their
+email address then shows on your sign-in screen.
 
 ### 1. Create a project
 
@@ -261,7 +263,8 @@ All of it goes through the proxy in **Settings > General**, like everything else
 ## Troubleshooting
 
 - **"Access blocked: Mirza has not completed the Google verification process"**: the app is
-  still in Testing. Publish it ([step 5](#5-publish-the-app)).
+  still in Testing and this account isn't one of its test users. Publish it
+  ([step 5](#5-publish-the-app)), or add the account under **Test users** on the Audience page.
 - **Signed out every week**: the same; publish the app, then sign in again.
 - **"The Tasks API (or Calendar API) is turned off in your Google Cloud project"**: turn it on
   ([step 2](#2-turn-on-the-tasks-and-calendar-apis)), then click **Try now**.

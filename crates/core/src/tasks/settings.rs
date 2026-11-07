@@ -46,7 +46,8 @@ impl Default for TaskSettings {
 }
 
 /// The client ID built into this copy, from `MIRZA_GOOGLE_CLIENT_ID` at build
-/// time; empty when it was built without one.
+/// time; empty when it was built without one. Official releases have none:
+/// each user brings their own client (see docs/voice-tasks.md).
 pub const BUILT_IN_CLIENT_ID: &str = match option_env!("MIRZA_GOOGLE_CLIENT_ID") {
     Some(id) => id,
     None => "",
