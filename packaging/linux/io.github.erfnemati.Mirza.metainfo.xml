@@ -51,6 +51,18 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2.0" date="2026-11-07">
+      <description>
+        <p>Soniox now uses its v6 model and gets the API key in a header. Update before 15 January
+        2027: from then on Soniox refuses the key the way 0.1.5 sends it. New and optional: AI
+        revision, a separate shortcut that lets Claude, OpenAI, Gemini, OpenRouter or your own
+        server drop fillers and repeats, keep your last correction and fix punctuation and
+        half-spaces; if the AI fails, the text is typed as you said it. Also new: voice tasks, a
+        task shortcut that saves what you say as a short task in the right Google Tasks list, plus
+        a Google Calendar event when you said a time, with Undo and Edit in the notification.
+        Mirza is now also an app for Android phones.</p>
+      </description>
+    </release>
     <release version="0.1.5" date="2026-10-10">
       <description>
         <p>On Windows, notifications show Mirza's name and icon instead of Windows PowerShell's. On
