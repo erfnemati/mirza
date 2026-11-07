@@ -51,6 +51,13 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2.1" date="2026-11-07">
+      <description>
+        <p>Voice tasks get a "Your own rules" box, on the desktop and on Android: rules for the AI
+        that reads your tasks, such as "Write the title in English.", which win over Mirza's own.
+        The voice tasks guide also explains the "invalid_request" error at Google sign-in.</p>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-11-07">
       <description>
         <p>Soniox now uses its v6 model and gets the API key in a header. Update before 15 January
