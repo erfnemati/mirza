@@ -9,10 +9,12 @@ What comes next is in [docs/roadmap.md](docs/roadmap.md).
 
 - `crates/core`: settings (`config.rs`), API keys (`secrets.rs`), providers (`providers/`), proxy and
   WebSocket (`net.rs`), audio capture, usage, update check. Platform-independent; the Android app
-  will reuse it.
+  uses it through `crates/mobile` (UniFFI).
 - `crates/hotkey`, `crates/inject`: global shortcuts and typing, per OS.
 - `crates/daemon`: the tray app (`mirza` binary).
 - `crates/panel`: the settings window (Tauri, plain JS in `ui/`). Needs WebKitGTK to build on Linux.
+- `android/`: the Android app (Kotlin over the core). Design in
+  [docs/android-app.md](docs/android-app.md).
 
 ## Build and test
 
@@ -53,9 +55,20 @@ tests come from the Release workflow run by hand (workflow artifacts).
   go back through a PR. `main` holds releases only.
 - CI minutes: run the three checks above locally first. Open PRs as drafts (CI skips them) and mark
   them ready once, after merging the latest `develop`. Pushing a branch runs no CI; only Rust
-  changes do.
+  changes do. After a push, wait until its skipped draft run has finished (`gh run list --branch
+  <b> --limit 2`) before `gh pr ready`: both runs share one concurrency group and the later one
+  cancels the real run (`gh run rerun <id>` starts it again).
 - Release: bump `version` in the root `Cargo.toml`, merge `develop` into `main`, tag `vX.Y.Z`; the
-  Release workflow builds the installers. Only when the owner asks.
+  Release workflow builds the installers and the APK. Only when the owner asks.
+- Never regenerate the Android release key (`.secrets/` in the main clone, see
+  [docs/android-app.md](docs/android-app.md)): with a new key every user has to uninstall and
+  reinstall.
+- Nothing personal in files, PR texts or new commit messages: no people's names (write "the
+  owner"), no phone or laptop tied to a person, no server or lab addresses, ports or host names, no
+  Google account details or live-test data, no keys, client IDs or tokens. Package ids and URLs
+  with `erfnemati` and generic phone steps (Xiaomi settings) are fine. Release builds embed no
+  Google client of the owner's (its consent screen would show their email); users paste their own.
+  Old commits are not rewritten.
 - No AI attribution in commits or PRs (no Co-Authored-By trailer). Older commits have one; don't
   copy it.
 - Every network call goes through the proxy setting (`net::connect_ws`, `usage::http_client`).
